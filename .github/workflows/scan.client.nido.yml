@@ -12,6 +12,14 @@ jobs:
         runs-on: ubuntu-24.04
         timeout-minutes: 30
 
+        env:
+            TARGET_REPOSITORY: NIDO-MACHINERIES/nidoworkz-backend
+            GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
+            TRIVY_VERSION: "0.69.3"
+            TRIVY_SEVERITY: HIGH,CRITICAL
+            TRIVY_SCANNERS: vuln,misconfig
+            REPORT_RETENTION_DAYS: "14"
+
         steps:
             - name: Checkout Platform Repository
               uses: actions/checkout@v5
@@ -19,7 +27,24 @@ jobs:
                   path: platform
                   persist-credentials: false
 
+            - name: Validate Configuration
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  if [[ ! "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+                    echo "::error::Invalid target repository format."
+                    exit 1
+                  fi
+
+                  if [[ ! "$REPORT_RETENTION_DAYS" =~ ^[0-9]+$ ]] ||
+                     (( REPORT_RETENTION_DAYS < 1 || REPORT_RETENTION_DAYS > 90 )); then
+                    echo "::error::REPORT_RETENTION_DAYS must be between 1 and 90."
+                    exit 1
+                  fi
+
             - name: Prepare Report Directory
+              shell: bash
               run: |
                   mkdir -p reports
                   printf '[]\n' > reports/gitleaks-report.json
@@ -29,11 +54,12 @@ jobs:
               env:
                   NIDO_USER: ${{ secrets.NIDO_ACCOUNT_USER }}
                   NIDO_TOKEN: ${{ secrets.NIDO_ACCOUNT_PAT }}
+              shell: bash
               run: |
                   set -euo pipefail
 
                   if [[ -z "$NIDO_USER" || -z "$NIDO_TOKEN" ]]; then
-                    echo "::error::NIDO account credentials are missing."
+                    echo "::error::NIDO repository credentials are missing."
                     exit 1
                   fi
 
@@ -41,17 +67,18 @@ jobs:
 
                   git -c http.extraheader="AUTHORIZATION: basic $BASIC_AUTH" \
                     clone \
-                    https://github.com/NIDO-MACHINERIES/nidoworkz-backend.git \
+                    "https://github.com/${TARGET_REPOSITORY}.git" \
                     target-repo
 
             - name: Scan Git History with Gitleaks
               id: gitleaks
               continue-on-error: true
+              shell: bash
               run: |
                   docker run --rm \
                     -v "$GITHUB_WORKSPACE:/workspace" \
                     -w /workspace/target-repo \
-                    ghcr.io/gitleaks/gitleaks:v8.30.1 \
+                    "$GITLEAKS_IMAGE" \
                     git . \
                     --redact \
                     --no-banner \
@@ -61,15 +88,16 @@ jobs:
             - name: Install Trivy
               uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
               with:
-                  version: latest
+                  version: ${{ env.TRIVY_VERSION }}
 
             - name: Scan Filesystem with Trivy
               id: trivy
               continue-on-error: true
+              shell: bash
               run: |
                   trivy fs \
-                    --scanners vuln,misconfig \
-                    --severity HIGH,CRITICAL \
+                    --scanners "$TRIVY_SCANNERS" \
+                    --severity "$TRIVY_SEVERITY" \
                     --format json \
                     --output reports/trivy-report.json \
                     --exit-code 1 \
@@ -82,6 +110,7 @@ jobs:
               env:
                   GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
                   TRIVY_STATUS: ${{ steps.trivy.outcome }}
+              shell: bash
               run: |
                   set -euo pipefail
 
@@ -92,7 +121,7 @@ jobs:
                     --gitleaks reports/gitleaks-report.json \
                     --trivy reports/trivy-report.json \
                     --output reports/security-report.xlsx \
-                    --repository "NIDO-MACHINERIES/nidoworkz-backend" \
+                    --repository "$TARGET_REPOSITORY" \
                     --gitleaks-status "$GITLEAKS_STATUS" \
                     --trivy-status "$TRIVY_STATUS" \
                     --workflow-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
@@ -107,16 +136,18 @@ jobs:
                   if-no-files-found: warn
                   retention-days: 14
 
-            - name: Fail if a scanner failed
+            - name: Fail if a scanner failed or found issues
               if: always()
               env:
                   GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
                   TRIVY_STATUS: ${{ steps.trivy.outcome }}
+              shell: bash
               run: |
                   if [[ "$GITLEAKS_STATUS" != "success" || "$TRIVY_STATUS" != "success" ]]; then
-                    echo "::error::At least one scanner failed or reported findings. Review the scan logs and reports."
+                    echo "::error::A scanner reported findings or encountered an error. Review reports and logs."
                     exit 1
                   fi
+
     email:
         name: Email Security Reports
         needs: scan
@@ -130,9 +161,7 @@ jobs:
 
                 Repository: NIDO-MACHINERIES/nidoworkz-backend
 
-                The security scan has completed.
-                Download the attached Excel workbook for the summary dashboard
-                and detailed Gitleaks and Trivy findings.
+                Review the attached Excel workbook and detailed scanner reports.
 
                 Workflow run:
                 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
