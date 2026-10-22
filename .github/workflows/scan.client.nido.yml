@@ -12,6 +12,13 @@ jobs:
         runs-on: ubuntu-24.04
         timeout-minutes: 30
 
+        outputs:
+            gitleaks_status: ${{ steps.gitleaks.outcome }}
+            trivy_status: ${{ steps.trivy.outcome }}
+            gitleaks_count: ${{ steps.report.outputs.gitleaks_count }}
+            trivy_count: ${{ steps.report.outputs.trivy_count }}
+            total_count: ${{ steps.report.outputs.total_count }}
+
         env:
             TARGET_REPOSITORY: NIDO-MACHINERIES/nidoworkz-backend
             GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
@@ -153,49 +160,18 @@ jobs:
         needs: scan
         if: always()
         uses: ./.github/workflows/send-reports.yml
+
         with:
             artifact_name: security-reports
-            email_subject: "Security Dashboard | NIDOWORKZ Backend"
+            email_subject: "Security Scan - NIDOWORKZ Backend"
             email_body: |
-                NIDOWORKZ SECURITY SCAN
-                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
                 Repository: NIDO-MACHINERIES/nidoworkz-backend
-                Scan Type: Gitleaks + Trivy
-                Trigger: GitHub Actions
-                Run ID: ${{ github.run_id }}
-
-                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                SCAN STATUS
-                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-                Gitleaks: Review the attached report for findings
-                Trivy: Review the attached report for findings
-
-                Overall Status: Check the workflow run for the final result.
-
-                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                REPORTS
-                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-                Excel Security Dashboard:
-                Attached as security-report.xlsx
-
-                Detailed Reports:
-                - gitleaks-report.json
-                - trivy-report.json
-
-                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                ACTION REQUIRED
-                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-                Review all HIGH and CRITICAL findings.
-                Investigate exposed secrets immediately.
-                Fix vulnerabilities and misconfigurations.
-                Re-run the pipeline after remediation.
-
-                View Workflow Run:
-                ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-                Reports are attached to this email.
+                Review the attached security reports.
+            workflow_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            scan_status: ${{ needs.scan.result }}
+            gitleaks_status: ${{ needs.scan.outputs.gitleaks_status }}
+            trivy_status: ${{ needs.scan.outputs.trivy_status }}
+            gitleaks_count: ${{ needs.scan.outputs.gitleaks_count }}
+            trivy_count: ${{ needs.scan.outputs.trivy_count }}
+            total_count: ${{ needs.scan.outputs.total_count }}
         secrets: inherit

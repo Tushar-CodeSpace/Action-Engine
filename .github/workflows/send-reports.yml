@@ -7,14 +7,59 @@ on:
                 description: Name of the uploaded report artifact
                 required: true
                 type: string
+
             email_subject:
                 description: Email subject
                 required: true
                 type: string
+
             email_body:
-                description: Email message body
+                description: Summary message for the dashboard
                 required: true
                 type: string
+
+            workflow_url:
+                description: URL of the pipeline run
+                required: false
+                type: string
+                default: ""
+
+            scan_status:
+                description: Overall scan job result
+                required: false
+                type: string
+                default: "unknown"
+
+            gitleaks_status:
+                description: Gitleaks step result
+                required: false
+                type: string
+                default: "unknown"
+
+            trivy_status:
+                description: Trivy step result
+                required: false
+                type: string
+                default: "unknown"
+
+            gitleaks_count:
+                description: Number of Gitleaks findings
+                required: false
+                type: string
+                default: "N/A"
+
+            trivy_count:
+                description: Number of Trivy findings
+                required: false
+                type: string
+                default: "N/A"
+
+            total_count:
+                description: Total security findings
+                required: false
+                type: string
+                default: "N/A"
+
         secrets:
             MAIL_USERNAME:
                 required: true
@@ -28,7 +73,7 @@ permissions:
 
 jobs:
     email:
-        name: Email Reports
+        name: Email Security Dashboard
         runs-on: ubuntu-24.04
         timeout-minutes: 10
 
@@ -39,13 +84,179 @@ jobs:
                   name: ${{ inputs.artifact_name }}
                   path: reports
 
-            - name: Verify Report Files
+            - name: Prepare HTML Dashboard
+              env:
+                  EMAIL_SUBJECT: ${{ inputs.email_subject }}
+                  EMAIL_SUMMARY: ${{ inputs.email_body }}
+                  WORKFLOW_URL: ${{ inputs.workflow_url }}
+                  SCAN_STATUS: ${{ inputs.scan_status }}
+                  GITLEAKS_STATUS: ${{ inputs.gitleaks_status }}
+                  TRIVY_STATUS: ${{ inputs.trivy_status }}
+                  GITLEAKS_COUNT: ${{ inputs.gitleaks_count }}
+                  TRIVY_COUNT: ${{ inputs.trivy_count }}
+                  TOTAL_COUNT: ${{ inputs.total_count }}
               shell: bash
               run: |
                   set -euo pipefail
-                  test -f reports/security-report.xlsx
-                  test -f reports/gitleaks-report.json
-                  test -f reports/trivy-report.json
+                  mkdir -p reports
+
+                  python3 - <<'PY'
+                  import html
+                  import os
+                  from pathlib import Path
+
+                  def get(name, default="N/A"):
+                      return os.environ.get(name, default).strip() or default
+
+                  def esc(value):
+                      return html.escape(value, quote=True)
+
+                  def status_style(value):
+                      value = value.lower()
+                      if value == "success":
+                          return "#dcfce7", "#166534", "SUCCESS"
+                      if value in ("failure", "cancelled", "timed_out"):
+                          return "#fee2e2", "#991b1b", "REVIEW REQUIRED"
+                      return "#fef3c7", "#92400e", "UNKNOWN"
+
+                  def status_card(label, raw):
+                      bg, fg, display = status_style(raw)
+                      return f"""
+                        <td style="padding:8px;width:33.33%;vertical-align:top">
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                 style="border:1px solid #e5e7eb;border-radius:8px">
+                            <tr><td style="padding:14px">
+                              <div style="font-size:12px;color:#6b7280">{esc(label)}</div>
+                              <div style="margin-top:8px">
+                                <span style="display:inline-block;background:{bg};color:{fg};
+                                  padding:6px 9px;border-radius:5px;font-size:12px;font-weight:bold">
+                                  {esc(display)}
+                                </span>
+                              </div>
+                            </td></tr>
+                          </table>
+                        </td>
+                      """
+
+                  subject = get("EMAIL_SUBJECT", "Security Scan Report")
+                  summary = esc(get("EMAIL_SUMMARY", "Security scan completed."))
+                  workflow_url = get("WORKFLOW_URL", "")
+                  workflow_link = ""
+                  if workflow_url.startswith(("https://github.com/", "https://")):
+                      workflow_link = (
+                          '<a href="' + esc(workflow_url) + '" '
+                          'style="color:#2563eb;text-decoration:none;font-weight:bold">'
+                          'View workflow run</a>'
+                      )
+                  else:
+                      workflow_link = "Workflow URL not provided"
+
+                  scan = get("SCAN_STATUS", "unknown")
+                  gl_status = get("GITLEAKS_STATUS", "unknown")
+                  trivy_status = get("TRIVY_STATUS", "unknown")
+
+                  bg, fg, scan_label = status_style(scan)
+
+                  html_doc = f"""<!doctype html>
+                  <html>
+                  <body style="margin:0;padding:0;background:#f3f4f6;
+                               font-family:Arial,Helvetica,sans-serif;color:#111827">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                           style="background:#f3f4f6;padding:24px 8px">
+                      <tr><td align="center">
+                        <table role="presentation" width="640" cellpadding="0" cellspacing="0"
+                               style="max-width:640px;width:100%;background:#ffffff;
+                                      border:1px solid #e5e7eb;border-radius:12px;overflow:hidden">
+                          <tr>
+                            <td style="background:#111827;padding:24px;color:#ffffff">
+                              <div style="font-size:12px;letter-spacing:1.5px;color:#cbd5e1">
+                                SECURITY OPERATIONS
+                              </div>
+                              <h1 style="font-size:24px;line-height:1.3;margin:10px 0 6px">
+                                Security Scan Dashboard
+                              </h1>
+                              <div style="font-size:14px;color:#d1d5db">{esc(subject)}</div>
+                            </td>
+                          </tr>
+
+                          <tr><td style="padding:22px 22px 8px">
+                            <div style="font-size:13px;color:#6b7280">OVERALL PIPELINE STATUS</div>
+                            <div style="margin-top:10px">
+                              <span style="display:inline-block;background:{bg};color:{fg};
+                                border-radius:6px;padding:8px 12px;font-weight:bold;font-size:13px">
+                                {esc(scan_label)}
+                              </span>
+                            </div>
+                            <p style="font-size:13px;line-height:1.6;color:#4b5563;margin:12px 0 0">
+                              {summary}
+                            </p>
+                          </td></tr>
+
+                          <tr><td style="padding:10px 14px 4px">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                              <tr>
+                                {status_card("GITLEAKS", gl_status)}
+                                {status_card("TRIVY", trivy_status)}
+                                {status_card("PIPELINE", scan)}
+                              </tr>
+                            </table>
+                          </td></tr>
+
+                          <tr><td style="padding:18px 22px 8px">
+                            <h2 style="font-size:16px;margin:0 0 12px">Findings Summary</h2>
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                   style="border-collapse:collapse">
+                              <tr style="background:#f9fafb">
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  Gitleaks findings
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("GITLEAKS_COUNT"))}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  Trivy findings
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("TRIVY_COUNT"))}</td>
+                              </tr>
+                              <tr style="background:#f9fafb">
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  Total findings
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("TOTAL_COUNT"))}</td>
+                              </tr>
+                            </table>
+                          </td></tr>
+
+                          <tr><td style="padding:18px 22px">
+                            <h2 style="font-size:16px;margin:0 0 10px">Reports &amp; Actions</h2>
+                            <p style="font-size:13px;line-height:1.7;color:#4b5563;margin:0 0 12px">
+                              The Excel dashboard and available JSON reports are attached to this email.
+                              Review findings, investigate exposed secrets, and remediate vulnerabilities
+                              or misconfigurations before the next release.
+                            </p>
+                            {workflow_link}
+                          </td></tr>
+
+                          <tr><td style="padding:16px 22px;background:#f9fafb;
+                                         border-top:1px solid #e5e7eb">
+                            <div style="font-size:11px;line-height:1.6;color:#6b7280">
+                              Automated notification from GitHub Actions. Verify scanner statuses and
+                              attached reports before treating this scan as clean.
+                            </div>
+                          </td></tr>
+                        </table>
+                      </td></tr>
+                    </table>
+                  </body>
+                  </html>
+                  """
+
+                  Path("reports/email-dashboard.html").write_text(html_doc, encoding="utf-8")
+                  print("HTML security dashboard generated.")
+                  PY
 
             - name: Send Email
               uses: dawidd6/action-send-mail@v4
@@ -56,7 +267,8 @@ jobs:
                   username: ${{ secrets.MAIL_USERNAME }}
                   password: ${{ secrets.MAIL_PASSWORD }}
                   to: ${{ secrets.MAIL_TO }}
-                  from: GitHub Pipeline Reports
+                  from: GitHub Security Dashboard
                   subject: ${{ inputs.email_subject }}
                   body: ${{ inputs.email_body }}
-                  attachments: reports/security-report.xlsx,reports/gitleaks-report.json,reports/trivy-report.json
+                  html_body: file://reports/email-dashboard.html
+                  attachments: reports/*
