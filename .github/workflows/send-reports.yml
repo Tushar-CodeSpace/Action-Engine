@@ -39,6 +39,14 @@ jobs:
                   name: ${{ inputs.artifact_name }}
                   path: reports
 
+            - name: Verify Report Files
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  test -f reports/security-report.xlsx
+                  test -f reports/gitleaks-report.json
+                  test -f reports/trivy-report.json
+
             - name: Send Email
               uses: dawidd6/action-send-mail@v4
               with:
@@ -51,4 +59,4 @@ jobs:
                   from: GitHub Pipeline Reports
                   subject: ${{ inputs.email_subject }}
                   body: ${{ inputs.email_body }}
-                  attachments: reports/*
+                  attachments: reports/security-report.xlsx,reports/gitleaks-report.json,reports/trivy-report.json
