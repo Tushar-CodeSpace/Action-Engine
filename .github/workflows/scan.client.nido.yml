@@ -10,7 +10,7 @@ jobs:
     scan:
         name: Gitleaks and Trivy
         runs-on: ubuntu-24.04
-        timeout-minutes: 15
+        timeout-minutes: 20
 
         steps:
             - name: Checkout Target Repository
@@ -21,7 +21,7 @@ jobs:
                   set -euo pipefail
 
                   if [[ -z "$NIDO_USER" || -z "$NIDO_TOKEN" ]]; then
-                    echo "::error::NIDO_USER or NIDO_ACCOUNT_PAT secret is missing."
+                    echo "::error::NIDO_ACCOUNT_USER or NIDO_ACCOUNT_PAT is missing."
                     exit 1
                   fi
 
@@ -62,6 +62,149 @@ jobs:
                     --no-progress \
                     target-repo
 
+            - name: Install Excel Dependency
+              if: always()
+              run: python3 -m pip install --user openpyxl
+
+            - name: Generate Excel Report
+              if: always()
+              env:
+                  GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
+                  TRIVY_STATUS: ${{ steps.trivy.outcome }}
+              run: |
+                  cat > generate_report.py <<'PY'
+                  import json
+                  import os
+                  from pathlib import Path
+                  from datetime import datetime, timezone
+                  from openpyxl import Workbook
+                  from openpyxl.styles import Font, PatternFill, Alignment
+                  from openpyxl.utils import get_column_letter
+
+                  def load_json(path, default):
+                      try:
+                          with open(path, encoding="utf-8") as f:
+                              return json.load(f)
+                      except (OSError, json.JSONDecodeError):
+                          return default
+
+                  gitleaks = load_json("gitleaks-report.json", [])
+                  trivy = load_json("trivy-report.json", {})
+
+                  if not isinstance(gitleaks, list):
+                      gitleaks = []
+
+                  gitleaks_rows = []
+                  for item in gitleaks:
+                      gitleaks_rows.append([
+                          item.get("RuleID", ""),
+                          item.get("Description", ""),
+                          item.get("File", ""),
+                          item.get("StartLine", ""),
+                          item.get("Commit", ""),
+                          item.get("Author", ""),
+                          item.get("Date", ""),
+                      ])
+
+                  trivy_rows = []
+                  for result in trivy.get("Results", []) or []:
+                      target = result.get("Target", "")
+                      for vuln in result.get("Vulnerabilities", []) or []:
+                          trivy_rows.append([
+                              "Vulnerability",
+                              vuln.get("VulnerabilityID", ""),
+                              vuln.get("PkgName", ""),
+                              vuln.get("InstalledVersion", ""),
+                              vuln.get("FixedVersion", ""),
+                              vuln.get("Severity", ""),
+                              target,
+                              vuln.get("Title", ""),
+                          ])
+
+                      for issue in result.get("Misconfigurations", []) or []:
+                          trivy_rows.append([
+                              "Misconfiguration",
+                              issue.get("ID", ""),
+                              issue.get("Type", ""),
+                              "",
+                              "",
+                              issue.get("Severity", ""),
+                              target,
+                              issue.get("Title", ""),
+                          ])
+
+                  gitleaks_status = os.getenv("GITLEAKS_STATUS", "unknown")
+                  trivy_status = os.getenv("TRIVY_STATUS", "unknown")
+
+                  wb = Workbook()
+                  summary = wb.active
+                  summary.title = "Summary"
+
+                  summary_rows = [
+                      ["NIDOWORKZ Backend Security Scan"],
+                      ["Repository", "NIDO-MACHINERIES/nidoworkz-backend"],
+                      ["Generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")],
+                      ["Gitleaks step outcome", gitleaks_status],
+                      ["Gitleaks findings", len(gitleaks_rows)],
+                      ["Trivy step outcome", trivy_status],
+                      ["Trivy findings", len(trivy_rows)],
+                      ["Total findings", len(gitleaks_rows) + len(trivy_rows)],
+                      ["Note", "A failed scan step may indicate findings or a scanner error. Review the workflow logs."],
+                  ]
+
+                  for row in summary_rows:
+                      summary.append(row)
+
+                  def add_sheet(name, headers, rows):
+                      ws = wb.create_sheet(name)
+                      ws.append(headers)
+                      for row in rows:
+                          ws.append(row)
+                      return ws
+
+                  gitleaks_ws = add_sheet(
+                      "Gitleaks Findings",
+                      ["Rule ID", "Description", "File", "Start Line", "Commit", "Author", "Date"],
+                      gitleaks_rows,
+                  )
+
+                  trivy_ws = add_sheet(
+                      "Trivy Findings",
+                      ["Finding Type", "ID", "Package / Type", "Installed Version",
+                       "Fixed Version", "Severity", "Target File", "Title"],
+                      trivy_rows,
+                  )
+
+                  for ws in wb.worksheets:
+                      ws.freeze_panes = "A2"
+                      ws.auto_filter.ref = ws.dimensions
+
+                      for cell in ws[1]:
+                          cell.font = Font(bold=True, color="FFFFFF")
+                          cell.fill = PatternFill("solid", fgColor="1F4E78")
+                          cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+                      for column_cells in ws.columns:
+                          max_length = 0
+                          column_letter = get_column_letter(column_cells[0].column)
+                          for cell in column_cells:
+                              cell.alignment = Alignment(vertical="top", wrap_text=True)
+                              max_length = max(max_length, len(str(cell.value or "")))
+                          ws.column_dimensions[column_letter].width = min(max(max_length + 2, 14), 55)
+
+                  summary.column_dimensions["A"].width = 28
+                  summary.column_dimensions["B"].width = 75
+
+                  wb.save("security-report.xlsx")
+
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                      output.write(f"gitleaks_count={len(gitleaks_rows)}\n")
+                      output.write(f"trivy_count={len(trivy_rows)}\n")
+                      output.write(f"total_count={len(gitleaks_rows) + len(trivy_rows)}\n")
+                  PY
+
+                  python3 generate_report.py
+
             - name: Email Security Reports
               if: always()
               uses: dawidd6/action-send-mail@v4
@@ -71,18 +214,27 @@ jobs:
                   secure: true
                   username: ${{ secrets.MAIL_USERNAME }}
                   password: ${{ secrets.MAIL_PASSWORD }}
-                  subject: "Security Scan Report - NIDOWORKZ Backend"
                   to: ${{ secrets.MAIL_TO }}
                   from: GitHub Security Scanner
+                  subject: "Security Report - NIDOWORKZ Backend"
                   body: |
-                      NIDOWORKZ Backend Security Scan
+                      NIDOWORKZ Backend Security Scan Report
 
                       Repository: NIDO-MACHINERIES/nidoworkz-backend
-                      Workflow: ${{ github.workflow }}
-                      Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-                      Gitleaks result: ${{ steps.gitleaks.outcome }}
-                      Trivy result: ${{ steps.trivy.outcome }}
+                      GITLEAKS
+                      Step outcome: ${{ steps.gitleaks.outcome }}
+                      Findings: ${{ steps.generate_report.outputs.gitleaks_count }}
 
-                      The attached JSON files contain the scan reports.
-                  attachments: gitleaks-report.json,trivy-report.json
+                      TRIVY
+                      Step outcome: ${{ steps.trivy.outcome }}
+                      Findings: ${{ steps.generate_report.outputs.trivy_count }}
+
+                      TOTAL FINDINGS: ${{ steps.generate_report.outputs.total_count }}
+
+                      Excel report includes a summary and detailed findings.
+                      JSON reports are attached where available.
+
+                      Workflow run:
+                      ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+                  attachments: security-report.xlsx,gitleaks-report.json,trivy-report.json
