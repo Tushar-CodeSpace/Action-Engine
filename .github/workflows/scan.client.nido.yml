@@ -10,10 +10,15 @@ jobs:
     scan:
         name: Gitleaks and Trivy
         runs-on: [self-hosted, Linux, X64, ActionEngine]
-        timeout-minutes: 20
+        timeout-minutes: 30
 
         steps:
-            # 1. Checkout target repository
+            - name: Prepare Report Directory
+              run: |
+                  mkdir -p reports
+                  printf '[]\n' > reports/gitleaks-report.json
+                  printf '{"Results":[]}\n' > reports/trivy-report.json
+
             - name: Checkout Target Repository
               env:
                   NIDO_USER: ${{ secrets.NIDO_ACCOUNT_USER }}
@@ -22,7 +27,7 @@ jobs:
                   set -euo pipefail
 
                   if [[ -z "$NIDO_USER" || -z "$NIDO_TOKEN" ]]; then
-                    echo "::error::NIDO_ACCOUNT_USER or NIDO_ACCOUNT_PAT is missing."
+                    echo "::error::NIDO account credentials are missing."
                     exit 1
                   fi
 
@@ -33,14 +38,7 @@ jobs:
                     https://github.com/NIDO-MACHINERIES/nidoworkz-backend.git \
                     target-repo
 
-            # 2. Initialize reports so email/report generation can handle missing output
-            - name: Prepare Report Files
-              run: |
-                  printf '[]\n' > gitleaks-report.json
-                  printf '{"Results":[]}\n' > trivy-report.json
-
-            # 3. Gitleaks secret scan
-            - name: Scan Git History for Secrets
+            - name: Scan Git History with Gitleaks
               id: gitleaks
               continue-on-error: true
               run: |
@@ -49,18 +47,16 @@ jobs:
                     -w /workspace/target-repo \
                     ghcr.io/gitleaks/gitleaks:v8.30.1 \
                     git . \
-                      --redact \
-                      --no-banner \
-                      --report-format json \
-                      --report-path /workspace/gitleaks-report.json
+                    --redact \
+                    --no-banner \
+                    --report-format json \
+                    --report-path /workspace/reports/gitleaks-report.json
 
-            # 4. Install Trivy
             - name: Install Trivy
               uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
               with:
                   version: latest
 
-            # 5. Trivy filesystem scan
             - name: Scan Filesystem with Trivy
               id: trivy
               continue-on-error: true
@@ -69,206 +65,194 @@ jobs:
                     --scanners vuln,misconfig \
                     --severity HIGH,CRITICAL \
                     --format json \
-                    --output trivy-report.json \
+                    --output reports/trivy-report.json \
                     --exit-code 1 \
                     --no-progress \
                     target-repo
 
-            # 6. Install Excel dependency
-            - name: Install Excel Dependency
-              if: always()
-              run: |
-                  python3 -m venv .venv
-                  .venv/bin/python -m pip install openpyxl
-
-            # 7. Generate Excel report
-            - name: Generate Excel Report
-              id: generate_report
+            - name: Generate Excel Dashboard
+              id: report
               if: always()
               env:
                   GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
                   TRIVY_STATUS: ${{ steps.trivy.outcome }}
               run: |
+                  set -euo pipefail
+
+                  python3 -m venv .venv
+                  .venv/bin/python -m pip install openpyxl
+
                   cat > generate_report.py <<'PY'
                   import json
                   import os
                   from datetime import datetime, timezone
                   from openpyxl import Workbook
-                  from openpyxl.styles import Font, PatternFill, Alignment
+                  from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
                   from openpyxl.utils import get_column_letter
+                  from openpyxl.formatting.rule import CellIsRule
 
-                  def load_json(path, default):
+                  def load(path, default):
                       try:
                           with open(path, encoding="utf-8") as f:
                               return json.load(f)
-                      except (OSError, json.JSONDecodeError):
+                      except (OSError, ValueError):
                           return default
 
-                  gitleaks = load_json("gitleaks-report.json", [])
-                  trivy = load_json("trivy-report.json", {})
+                  secrets_found = load("reports/gitleaks-report.json", [])
+                  trivy = load("reports/trivy-report.json", {})
+                  if not isinstance(secrets_found, list):
+                      secrets_found = []
 
-                  if not isinstance(gitleaks, list):
-                      gitleaks = []
-
-                  gitleaks_rows = []
-                  for item in gitleaks:
-                      gitleaks_rows.append([
-                          item.get("RuleID", ""),
-                          item.get("Description", ""),
-                          item.get("File", ""),
-                          item.get("StartLine", ""),
-                          item.get("Commit", ""),
-                          item.get("Author", ""),
-                          item.get("Date", ""),
-                      ])
+                  secret_rows = [[
+                      x.get("RuleID", ""),
+                      x.get("Description", ""),
+                      x.get("File", ""),
+                      x.get("StartLine", ""),
+                      x.get("Commit", ""),
+                      x.get("Author", ""),
+                      x.get("Date", ""),
+                  ] for x in secrets_found]
 
                   trivy_rows = []
+                  severity_counts = {
+                      "CRITICAL": 0, "HIGH": 0, "MEDIUM": 0,
+                      "LOW": 0, "UNKNOWN": 0
+                  }
+
                   for result in trivy.get("Results", []) or []:
                       target = result.get("Target", "")
 
                       for vuln in result.get("Vulnerabilities", []) or []:
+                          severity = (vuln.get("Severity") or "UNKNOWN").upper()
+                          severity_counts[severity] = severity_counts.get(severity, 0) + 1
                           trivy_rows.append([
                               "Vulnerability",
                               vuln.get("VulnerabilityID", ""),
                               vuln.get("PkgName", ""),
                               vuln.get("InstalledVersion", ""),
                               vuln.get("FixedVersion", ""),
-                              vuln.get("Severity", ""),
+                              severity,
                               target,
                               vuln.get("Title", ""),
                           ])
 
                       for issue in result.get("Misconfigurations", []) or []:
+                          severity = (issue.get("Severity") or "UNKNOWN").upper()
+                          severity_counts[severity] = severity_counts.get(severity, 0) + 1
                           trivy_rows.append([
                               "Misconfiguration",
                               issue.get("ID", ""),
                               issue.get("Type", ""),
                               "",
                               "",
-                              issue.get("Severity", ""),
+                              severity,
                               target,
                               issue.get("Title", ""),
                           ])
 
-                  gitleaks_status = os.getenv("GITLEAKS_STATUS", "unknown")
-                  trivy_status = os.getenv("TRIVY_STATUS", "unknown")
-                  total = len(gitleaks_rows) + len(trivy_rows)
-
                   wb = Workbook()
-                  summary = wb.active
-                  summary.title = "Summary"
+                  ws = wb.active
+                  ws.title = "Executive Summary"
 
-                  summary_rows = [
-                      ["NIDOWORKZ Backend Security Scan"],
-                      ["Repository", "NIDO-MACHINERIES/nidoworkz-backend"],
-                      ["Generated (UTC)", datetime.now(timezone.utc).strftime(
-                          "%Y-%m-%d %H:%M:%S"
-                      )],
-                      ["Gitleaks step outcome", gitleaks_status],
-                      ["Gitleaks findings", len(gitleaks_rows)],
-                      ["Trivy step outcome", trivy_status],
-                      ["Trivy findings", len(trivy_rows)],
-                      ["Total findings", total],
-                      ["Note", "A failed scan may indicate findings or a scanner error. "
-                               "Review workflow logs before drawing conclusions."],
-                  ]
+                  ws.append(["NIDOWORKZ | SECURITY SCAN"])
+                  ws.append(["Repository", "NIDO-MACHINERIES/nidoworkz-backend"])
+                  ws.append(["Scan time (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")])
+                  ws.append(["Gitleaks status", os.getenv("GITLEAKS_STATUS", "unknown")])
+                  ws.append(["Gitleaks findings", len(secret_rows)])
+                  ws.append(["Trivy status", os.getenv("TRIVY_STATUS", "unknown")])
+                  ws.append(["Trivy findings", len(trivy_rows)])
+                  ws.append(["Total findings", len(secret_rows) + len(trivy_rows)])
+                  ws.append(["", ""])
+                  ws.append(["TRIVY SEVERITY BREAKDOWN", "Count"])
 
-                  for row in summary_rows:
-                      summary.append(row)
+                  for severity in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]:
+                      ws.append([severity, severity_counts.get(severity, 0)])
 
-                  def add_sheet(name, headers, rows):
-                      ws = wb.create_sheet(name)
-                      ws.append(headers)
+                  ws.append(["", ""])
+                  ws.append(["Interpretation",
+                             "A failed scanner may indicate findings or a scanner error. Review run logs."])
+                  ws.append(["Workflow run", os.getenv("GITHUB_SERVER_URL", "https://github.com")
+                             + "/" + os.getenv("GITHUB_REPOSITORY", "")
+                             + "/actions/runs/" + os.getenv("GITHUB_RUN_ID", "")])
+
+                  def add_sheet(title, headers, rows):
+                      sheet = wb.create_sheet(title)
+                      sheet.append(headers)
                       for row in rows:
-                          ws.append(row)
-                      return ws
+                          sheet.append(row)
+                      sheet.freeze_panes = "A2"
+                      sheet.auto_filter.ref = sheet.dimensions
+                      return sheet
 
-                  add_sheet(
-                      "Gitleaks Findings",
-                      ["Rule ID", "Description", "File", "Start Line",
-                       "Commit", "Author", "Date"],
-                      gitleaks_rows,
-                  )
+                  add_sheet("Gitleaks Findings", [
+                      "Rule ID", "Description", "File", "Start Line",
+                      "Commit", "Author", "Date"
+                  ], secret_rows)
 
-                  add_sheet(
-                      "Trivy Findings",
-                      ["Finding Type", "ID", "Package / Type",
-                       "Installed Version", "Fixed Version", "Severity",
-                       "Target File", "Title"],
-                      trivy_rows,
-                  )
+                  add_sheet("Trivy Findings", [
+                      "Finding Type", "ID", "Package / Type", "Installed Version",
+                      "Fixed Version", "Severity", "Target File", "Title"
+                  ], trivy_rows)
 
-                  for ws in wb.worksheets:
-                      if ws.max_row >= 1 and ws.max_column >= 1:
-                          ws.freeze_panes = "A2"
-                          if ws.max_row > 1:
-                              ws.auto_filter.ref = ws.dimensions
+                  header_fill = PatternFill("solid", fgColor="17365D")
+                  header_font = Font(bold=True, color="FFFFFF")
+                  thin_gray = Side(style="thin", color="D9E2F3")
 
-                      for cell in ws[1]:
-                          cell.font = Font(bold=True, color="FFFFFF")
-                          cell.fill = PatternFill("solid", fgColor="1F4E78")
-                          cell.alignment = Alignment(wrap_text=True, vertical="top")
+                  for sheet in wb.worksheets:
+                      sheet.sheet_view.showGridLines = False
+                      for cell in sheet[1]:
+                          cell.fill = header_fill
+                          cell.font = header_font
+                          cell.alignment = Alignment(wrap_text=True, vertical="center")
+                      sheet.row_dimensions[1].height = 28
 
-                      for column_cells in ws.columns:
-                          letter = get_column_letter(column_cells[0].column)
-                          max_length = max(
-                              len(str(cell.value or ""))
-                              for cell in column_cells
-                          )
-                          ws.column_dimensions[letter].width = min(
-                              max(max_length + 2, 14), 55
-                          )
-
-                      for row in ws.iter_rows():
+                      for row in sheet.iter_rows():
                           for cell in row:
-                              cell.alignment = Alignment(
-                                  vertical="top", wrap_text=True
-                              )
+                              cell.alignment = Alignment(vertical="top", wrap_text=True)
+                              cell.border = Border(bottom=thin_gray)
 
-                  summary.column_dimensions["A"].width = 30
-                  summary.column_dimensions["B"].width = 85
+                      for col in sheet.columns:
+                          letter = get_column_letter(col[0].column)
+                          width = max(len(str(c.value or "")) for c in col) + 2
+                          sheet.column_dimensions[letter].width = min(max(width, 14), 55)
 
-                  wb.save("security-report.xlsx")
+                  ws.column_dimensions["A"].width = 30
+                  ws.column_dimensions["B"].width = 85
+                  ws.freeze_panes = "A2"
 
-                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                      output.write(f"gitleaks_count={len(gitleaks_rows)}\n")
-                      output.write(f"trivy_count={len(trivy_rows)}\n")
-                      output.write(f"total_count={total}\n")
+                  # Highlight non-zero severity counts.
+                  for severity_row in range(11, 16):
+                      ws.cell(severity_row, 2).number_format = "0"
+
+                  wb.save("reports/security-report.xlsx")
+
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                      f.write(f"gitleaks_count={len(secret_rows)}\n")
+                      f.write(f"trivy_count={len(trivy_rows)}\n")
+                      f.write(f"total_count={len(secret_rows) + len(trivy_rows)}\n")
                   PY
 
-                  .venv/bin/python generate_report.py
+                  GITHUB_SERVER_URL="$GITHUB_SERVER_URL" \
+                  GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
+                  GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+                    .venv/bin/python generate_report.py
 
-            # 8. Email reports
-            - name: Email Security Reports
+            - name: Upload Security Reports
               if: always()
-              uses: dawidd6/action-send-mail@v4
+              uses: actions/upload-artifact@v4
               with:
-                  server_address: smtp.gmail.com
-                  server_port: 465
-                  secure: true
-                  username: ${{ secrets.MAIL_USERNAME }}
-                  password: ${{ secrets.MAIL_PASSWORD }}
-                  to: ${{ secrets.MAIL_TO }}
-                  from: GitHub Security Scanner
-                  subject: "Security Report - NIDOWORKZ Backend"
-                  body: |
-                      NIDOWORKZ Backend Security Scan Report
+                  name: security-reports
+                  path: reports/
+                  if-no-files-found: warn
+                  retention-days: 14
 
-                      Repository: NIDO-MACHINERIES/nidoworkz-backend
-
-                      GITLEAKS
-                      Step outcome: ${{ steps.gitleaks.outcome }}
-                      Findings: ${{ steps.generate_report.outputs.gitleaks_count }}
-
-                      TRIVY
-                      Step outcome: ${{ steps.trivy.outcome }}
-                      Findings: ${{ steps.generate_report.outputs.trivy_count }}
-
-                      TOTAL FINDINGS: ${{ steps.generate_report.outputs.total_count }}
-
-                      The Excel report contains a summary and detailed findings.
-                      JSON reports are attached where available.
-
-                      Workflow run:
-                      ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-                  attachments: security-report.xlsx,gitleaks-report.json,trivy-report.json
+            - name: Fail if a scanner failed
+              if: always()
+              env:
+                  GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
+                  TRIVY_STATUS: ${{ steps.trivy.outcome }}
+              run: |
+                  if [[ "$GITLEAKS_STATUS" != "success" || "$TRIVY_STATUS" != "success" ]]; then
+                    echo "::error::At least one scanner failed or reported findings. Review the scan logs and reports."
+                    exit 1
+                  fi
