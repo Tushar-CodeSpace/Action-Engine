@@ -1,0 +1,55 @@
+name: Send Pipeline Reports
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        description: Name of the uploaded report artifact
+        required: true
+        type: string
+      email_subject:
+        description: Email subject
+        required: true
+        type: string
+      email_body:
+        description: Email message body
+        required: true
+        type: string
+    secrets:
+      MAIL_USERNAME:
+        required: true
+      MAIL_PASSWORD:
+        required: true
+      MAIL_TO:
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  email:
+    name: Email Reports
+    runs-on: [self-hosted, Linux, X64, ActionEngine]
+    timeout-minutes: 10
+
+    steps:
+      - name: Download Report Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: reports
+
+      - name: Send Email
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          to: ${{ secrets.MAIL_TO }}
+          from: GitHub Pipeline Reports
+          subject: ${{ inputs.email_subject }}
+          body: ${{ inputs.email_body }}
+          attachments: reports/*
