@@ -73,7 +73,7 @@ permissions:
 
 jobs:
     email:
-        name: Email Security Dashboard
+        name: Send Email
         runs-on: ubuntu-24.04
         timeout-minutes: 10
 

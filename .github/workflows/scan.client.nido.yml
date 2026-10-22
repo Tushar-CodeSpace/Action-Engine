@@ -156,7 +156,7 @@ jobs:
                   fi
 
     email:
-        name: Email Security Reports
+        name: Security Reports
         needs: scan
         if: always()
         uses: ./.github/workflows/send-reports.yml
