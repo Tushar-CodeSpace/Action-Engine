@@ -9,7 +9,7 @@ permissions:
 jobs:
     scan:
         name: Gitleaks and Trivy
-        runs-on: [self-hosted, Linux, X64, ActionEngine]
+        runs-on: ubuntu-24.04
         timeout-minutes: 30
 
         steps:
