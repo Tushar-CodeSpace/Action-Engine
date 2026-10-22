@@ -32,14 +32,35 @@ def parse_gitleaks(data):
 
 def parse_trivy(data):
     rows = []
-    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
+    packages = []
+    counts = {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNKNOWN": 0
+    }
+    
     if not isinstance(data, dict):
-        return rows, counts
+        return rows, counts, packages 
 
     for result in data.get("Results", []) or []:
         if not isinstance(result, dict):
             continue
+        
         target = result.get("Target", "")
+        
+        for package in result.get("Packages", []) or []:
+            if not isinstance(package, dict):
+                continue
+            
+            packages.append([
+                package.get("Name",  ""),
+                package.get("Version", ""),
+                result.get("Type", ""),
+                target,
+            ])
+        
         for vuln in result.get("Vulnerabilities", []) or []:
             if not isinstance(vuln, dict):
                 continue
@@ -60,7 +81,7 @@ def parse_trivy(data):
                 "Misconfiguration", issue.get("ID", ""), issue.get("Type", ""),
                 "", "", severity, target, issue.get("Title", ""),
             ])
-    return rows, counts
+    return rows, counts, packages
 
 
 def add_sheet(wb, title, headers, rows):
@@ -101,7 +122,7 @@ def style_workbook(wb):
     summary.column_dimensions["A"].width = 30
     summary.column_dimensions["B"].width = 85
     summary.conditional_formatting.add(
-        "B11:B15",
+        "B12:B16",
         CellIsRule(
             operator="greaterThan",
             formula=["0"],
@@ -129,7 +150,7 @@ def main():
         gitleaks = []
 
     gitleaks_rows = parse_gitleaks(gitleaks)
-    trivy_rows, severity_counts = parse_trivy(trivy)
+    trivy_rows, severity_counts, package_rows = parse_trivy(trivy)
     total = len(gitleaks_rows) + len(trivy_rows)
 
     wb = Workbook()
@@ -143,6 +164,7 @@ def main():
         ["Gitleaks findings", len(gitleaks_rows)],
         ["Trivy status", args.trivy_status],
         ["Trivy findings", len(trivy_rows)],
+        ["Trivy packages analyzed", len(package_rows)],
         ["Total findings", total],
         ["", ""],
         ["TRIVY SEVERITY BREAKDOWN", "Count"],
@@ -166,6 +188,12 @@ def main():
               ["Finding Type", "ID", "Package / Type", "Installed Version",
                "Fixed Version", "Severity", "Target File", "Title"],
               trivy_rows)
+    add_sheet(
+        wb,
+        "Trivy Packages",
+        ["Package", "Version", "Type", "Target File"],
+        package_rows,
+    )
     style_workbook(wb)
 
     output = Path(args.output)
@@ -175,6 +203,7 @@ def main():
     print(f"Excel report: {output}")
     print(f"Gitleaks findings: {len(gitleaks_rows)}")
     print(f"Trivy findings: {len(trivy_rows)}")
+    print(f"Trivy packages analyzed: {len(package_rows)}")
     print(f"Total findings: {total}")
 
     if args.github_output:
