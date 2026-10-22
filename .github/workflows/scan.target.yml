@@ -1,0 +1,147 @@
+name: Scan - Target
+
+on:
+    workflow_dispatch:
+        inputs:
+            repo_link:
+                description: "Enter the target GitHub repository URL"
+                required: true
+                type: string
+
+            repo_type:
+                description: "Select repository owner type"
+                required: true
+                type: choice
+                options:
+                    - Personal
+                    - NIDO
+
+            repo_visibility:
+                description: "Select repository visibility"
+                required: true
+                type: choice
+                options:
+                    - Public
+                    - Private
+
+permissions:
+    contents: read
+
+jobs:
+    validate:
+        name: Validate Target Repository
+        runs-on: ubuntu-24.04
+        outputs:
+            repository: ${{ steps.parse.outputs.repository }}
+
+        steps:
+            - name: Validate Repository URL
+              id: parse
+              shell: bash
+              env:
+                  REPO_LINK: ${{ inputs.repo_link }}
+              run: |
+                  set -euo pipefail
+
+                  if [[ "$REPO_LINK" =~ ^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/?$ ]]; then
+                    OWNER="${BASH_REMATCH[1]}"
+                    REPO="${BASH_REMATCH[2]}"
+                  elif [[ "$REPO_LINK" =~ ^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)\.git$ ]]; then
+                    OWNER="${BASH_REMATCH[1]}"
+                    REPO="${BASH_REMATCH[2]}"
+                  else
+                    echo "::error::Invalid GitHub repository URL."
+                    exit 1
+                  fi
+
+                  echo "repository=${OWNER}/${REPO}" >> "$GITHUB_OUTPUT"
+
+    gitleaks:
+        name: Secret Scan (Gitleaks)
+        needs: validate
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
+
+        env:
+            TARGET_TOKEN: ${{ inputs.repo_type == 'Personal' && inputs.repo_visibility == 'Private' && secrets.PERSONAL_ACCOUNT_PAT || inputs.repo_type == 'NIDO' && secrets.NIDO_ACCOUNT_PAT || '' }}
+
+        steps:
+            - name: Validate Target Access
+              shell: bash
+              env:
+                  REPO_TYPE: ${{ inputs.repo_type }}
+                  REPO_VISIBILITY: ${{ inputs.repo_visibility }}
+              run: |
+                  if [[ "$REPO_TYPE" == "Personal" && "$REPO_VISIBILITY" == "Private" && -z "$TARGET_TOKEN" ]]; then
+                    echo "::error::PERSONAL_ACCOUNT_PAT is required for private Personal repositories."
+                    exit 1
+                  fi
+
+                  if [[ "$REPO_TYPE" == "NIDO" && -z "$TARGET_TOKEN" ]]; then
+                    echo "::error::NIDO_ACCOUNT_PAT is required for NIDO repositories."
+                    exit 1
+                  fi
+
+            - name: Checkout Target Repository
+              uses: actions/checkout@v5
+              with:
+                  repository: ${{ needs.validate.outputs.repository }}
+                  token: ${{ env.TARGET_TOKEN || github.token }}
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Scan Git History for Secrets
+              run: |
+                  docker run --rm \
+                    -v "$GITHUB_WORKSPACE:/path" \
+                    -w /path \
+                    ghcr.io/gitleaks/gitleaks:v8.30.1 \
+                    git . --redact --no-banner
+
+    trivy:
+        name: File System Scan (Trivy)
+        needs: validate
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
+
+        env:
+            TARGET_TOKEN: ${{ inputs.repo_type == 'Personal' && inputs.repo_visibility == 'Private' && secrets.PERSONAL_ACCOUNT_PAT || inputs.repo_type == 'NIDO' && secrets.NIDO_ACCOUNT_PAT || '' }}
+
+        steps:
+            - name: Validate Target Access
+              shell: bash
+              env:
+                  REPO_TYPE: ${{ inputs.repo_type }}
+                  REPO_VISIBILITY: ${{ inputs.repo_visibility }}
+              run: |
+                  if [[ "$REPO_TYPE" == "Personal" && "$REPO_VISIBILITY" == "Private" && -z "$TARGET_TOKEN" ]]; then
+                    echo "::error::PERSONAL_ACCOUNT_PAT is required for private Personal repositories."
+                    exit 1
+                  fi
+
+                  if [[ "$REPO_TYPE" == "NIDO" && -z "$TARGET_TOKEN" ]]; then
+                    echo "::error::NIDO_ACCOUNT_PAT is required for NIDO repositories."
+                    exit 1
+                  fi
+
+            - name: Checkout Target Repository
+              uses: actions/checkout@v5
+              with:
+                  repository: ${{ needs.validate.outputs.repository }}
+                  token: ${{ env.TARGET_TOKEN || github.token }}
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Install Trivy
+              uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
+              with:
+                  version: latest
+
+            - name: Scan Filesystem for Vulnerabilities and Misconfigurations
+              run: |
+                  trivy fs \
+                    --scanners vuln,misconfig \
+                    --severity HIGH,CRITICAL \
+                    --exit-code 1 \
+                    --no-progress \
+                    .
