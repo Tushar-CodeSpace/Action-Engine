@@ -8,9 +8,9 @@ permissions:
 
 jobs:
     scan:
-        name: Gitleaks and Trivy
+        name: Gitleaks, Trivy and OWASP
         runs-on: ubuntu-24.04
-        timeout-minutes: 20
+        timeout-minutes: 45
 
         steps:
             - name: Checkout Target Repository
@@ -29,6 +29,14 @@ jobs:
                     clone \
                     https://github.com/NIDO-MACHINERIES/nidoworkz-backend.git \
                     target-repo
+
+            - name: Prepare Report Files
+              run: |
+                  mkdir -p owasp-report
+                  printf '[]\n' > gitleaks-report.json
+                  printf '{"Results":[]}\n' > trivy-report.json
+                  printf '{"dependencies":[]}\n' \
+                    > owasp-report/dependency-check-report.json
 
             - name: Scan Git History for Secrets
               id: gitleaks
@@ -62,20 +70,48 @@ jobs:
                     --no-progress \
                     target-repo
 
+            - name: OWASP Dependency-Check
+              id: owasp
+              continue-on-error: true
+              env:
+                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+              run: |
+                  set -euo pipefail
+
+                  NVD_ARGS=()
+                  if [[ -n "${NVD_API_KEY:-}" ]]; then
+                    NVD_ARGS+=(--nvdApiKey "$NVD_API_KEY")
+                  else
+                    echo "::warning::NVD_API_KEY is not configured. Updates may be slower."
+                  fi
+
+                  docker run --rm \
+                    -v "$GITHUB_WORKSPACE/target-repo:/src:ro" \
+                    -v "$GITHUB_WORKSPACE/owasp-report:/report" \
+                    owasp/dependency-check:latest \
+                    --scan /src \
+                    --project "NIDOWORKZ Backend" \
+                    --format JSON \
+                    --out /report \
+                    "${NVD_ARGS[@]}"
+
             - name: Install Excel Dependency
               if: always()
-              run: python3 -m pip install --user openpyxl
+              run: |
+                  python3 -m venv .venv
+                  .venv/bin/python -m pip install openpyxl
 
             - name: Generate Excel Report
+              id: generate_report
               if: always()
               env:
                   GITLEAKS_STATUS: ${{ steps.gitleaks.outcome }}
                   TRIVY_STATUS: ${{ steps.trivy.outcome }}
+                  OWASP_STATUS: ${{ steps.owasp.outcome }}
               run: |
                   cat > generate_report.py <<'PY'
                   import json
                   import os
-                  from pathlib import Path
                   from datetime import datetime, timezone
                   from openpyxl import Workbook
                   from openpyxl.styles import Font, PatternFill, Alignment
@@ -90,6 +126,9 @@ jobs:
 
                   gitleaks = load_json("gitleaks-report.json", [])
                   trivy = load_json("trivy-report.json", {})
+                  owasp = load_json(
+                      "owasp-report/dependency-check-report.json", {}
+                  )
 
                   if not isinstance(gitleaks, list):
                       gitleaks = []
@@ -109,6 +148,7 @@ jobs:
                   trivy_rows = []
                   for result in trivy.get("Results", []) or []:
                       target = result.get("Target", "")
+
                       for vuln in result.get("Vulnerabilities", []) or []:
                           trivy_rows.append([
                               "Vulnerability",
@@ -133,8 +173,31 @@ jobs:
                               issue.get("Title", ""),
                           ])
 
+                  owasp_rows = []
+                  for dependency in owasp.get("dependencies", []) or []:
+                      for vuln in dependency.get("vulnerabilities", []) or []:
+                          cvss = vuln.get("cvssv3", {}) or {}
+                          references = vuln.get("references", []) or []
+
+                          owasp_rows.append([
+                              dependency.get("fileName", ""),
+                              dependency.get("filePath", ""),
+                              vuln.get("name", ""),
+                              vuln.get("severity", ""),
+                              cvss.get("baseScore", ""),
+                              vuln.get("description", ""),
+                              ", ".join(
+                                  ref.get("url", "")
+                                  for ref in references
+                                  if ref.get("url")
+                              ),
+                          ])
+
                   gitleaks_status = os.getenv("GITLEAKS_STATUS", "unknown")
                   trivy_status = os.getenv("TRIVY_STATUS", "unknown")
+                  owasp_status = os.getenv("OWASP_STATUS", "unknown")
+
+                  total = len(gitleaks_rows) + len(trivy_rows) + len(owasp_rows)
 
                   wb = Workbook()
                   summary = wb.active
@@ -143,13 +206,19 @@ jobs:
                   summary_rows = [
                       ["NIDOWORKZ Backend Security Scan"],
                       ["Repository", "NIDO-MACHINERIES/nidoworkz-backend"],
-                      ["Generated (UTC)", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")],
+                      ["Generated (UTC)", datetime.now(timezone.utc).strftime(
+                          "%Y-%m-%d %H:%M:%S"
+                      )],
                       ["Gitleaks step outcome", gitleaks_status],
                       ["Gitleaks findings", len(gitleaks_rows)],
                       ["Trivy step outcome", trivy_status],
                       ["Trivy findings", len(trivy_rows)],
-                      ["Total findings", len(gitleaks_rows) + len(trivy_rows)],
-                      ["Note", "A failed scan step may indicate findings or a scanner error. Review the workflow logs."],
+                      ["OWASP step outcome", owasp_status],
+                      ["OWASP findings", len(owasp_rows)],
+                      ["Total findings", total],
+                      ["Interpretation",
+                       "A failed scan may indicate findings or a scanner error. "
+                       "Review workflow logs before drawing conclusions."],
                   ]
 
                   for row in summary_rows:
@@ -162,17 +231,26 @@ jobs:
                           ws.append(row)
                       return ws
 
-                  gitleaks_ws = add_sheet(
+                  add_sheet(
                       "Gitleaks Findings",
-                      ["Rule ID", "Description", "File", "Start Line", "Commit", "Author", "Date"],
+                      ["Rule ID", "Description", "File", "Start Line",
+                       "Commit", "Author", "Date"],
                       gitleaks_rows,
                   )
 
-                  trivy_ws = add_sheet(
+                  add_sheet(
                       "Trivy Findings",
-                      ["Finding Type", "ID", "Package / Type", "Installed Version",
-                       "Fixed Version", "Severity", "Target File", "Title"],
+                      ["Finding Type", "ID", "Package / Type",
+                       "Installed Version", "Fixed Version", "Severity",
+                       "Target File", "Title"],
                       trivy_rows,
+                  )
+
+                  add_sheet(
+                      "OWASP Findings",
+                      ["Dependency", "File Path", "CVE", "Severity",
+                       "CVSS Score", "Description", "References"],
+                      owasp_rows,
                   )
 
                   for ws in wb.worksheets:
@@ -182,28 +260,39 @@ jobs:
                       for cell in ws[1]:
                           cell.font = Font(bold=True, color="FFFFFF")
                           cell.fill = PatternFill("solid", fgColor="1F4E78")
-                          cell.alignment = Alignment(wrap_text=True, vertical="top")
+                          cell.alignment = Alignment(
+                              wrap_text=True, vertical="top"
+                          )
 
                       for column_cells in ws.columns:
-                          max_length = 0
-                          column_letter = get_column_letter(column_cells[0].column)
-                          for cell in column_cells:
-                              cell.alignment = Alignment(vertical="top", wrap_text=True)
-                              max_length = max(max_length, len(str(cell.value or "")))
-                          ws.column_dimensions[column_letter].width = min(max(max_length + 2, 14), 55)
+                          letter = get_column_letter(column_cells[0].column)
+                          max_length = max(
+                              len(str(cell.value or ""))
+                              for cell in column_cells
+                          )
+                          ws.column_dimensions[letter].width = min(
+                              max(max_length + 2, 14), 55
+                          )
 
-                  summary.column_dimensions["A"].width = 28
-                  summary.column_dimensions["B"].width = 75
+                      for row in ws.iter_rows():
+                          for cell in row:
+                              cell.alignment = Alignment(
+                                  vertical="top", wrap_text=True
+                              )
+
+                  summary.column_dimensions["A"].width = 30
+                  summary.column_dimensions["B"].width = 85
 
                   wb.save("security-report.xlsx")
 
-                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  with open(os.environ["GITHUB_OUTPUT"], "a") as output:
                       output.write(f"gitleaks_count={len(gitleaks_rows)}\n")
                       output.write(f"trivy_count={len(trivy_rows)}\n")
-                      output.write(f"total_count={len(gitleaks_rows) + len(trivy_rows)}\n")
+                      output.write(f"owasp_count={len(owasp_rows)}\n")
+                      output.write(f"total_count={total}\n")
                   PY
 
-                  python3 generate_report.py
+                  .venv/bin/python generate_report.py
 
             - name: Email Security Reports
               if: always()
@@ -218,23 +307,27 @@ jobs:
                   from: GitHub Security Scanner
                   subject: "Security Report - NIDOWORKZ Backend"
                   body: |
-                      NIDOWORKZ Backend Security Scan Report
+                      NIDOWORKZ Backend Security Scan
 
                       Repository: NIDO-MACHINERIES/nidoworkz-backend
 
                       GITLEAKS
-                      Step outcome: ${{ steps.gitleaks.outcome }}
+                      Status: ${{ steps.gitleaks.outcome }}
                       Findings: ${{ steps.generate_report.outputs.gitleaks_count }}
 
                       TRIVY
-                      Step outcome: ${{ steps.trivy.outcome }}
+                      Status: ${{ steps.trivy.outcome }}
                       Findings: ${{ steps.generate_report.outputs.trivy_count }}
+
+                      OWASP DEPENDENCY-CHECK
+                      Status: ${{ steps.owasp.outcome }}
+                      Findings: ${{ steps.generate_report.outputs.owasp_count }}
 
                       TOTAL FINDINGS: ${{ steps.generate_report.outputs.total_count }}
 
-                      Excel report includes a summary and detailed findings.
-                      JSON reports are attached where available.
+                      The Excel attachment contains the summary and detailed findings.
+                      JSON reports are also attached.
 
                       Workflow run:
                       ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-                  attachments: security-report.xlsx,gitleaks-report.json,trivy-report.json
+                  attachments: security-report.xlsx,gitleaks-report.json,trivy-report.json,owasp-report/dependency-check-report.json
