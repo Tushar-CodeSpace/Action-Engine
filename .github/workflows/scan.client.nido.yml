@@ -1,53 +1,88 @@
 name: Scan - Client - NIDO
 
 on:
-  workflow_dispatch:
+    workflow_dispatch:
 
 permissions:
-  contents: read
+    contents: read
 
 jobs:
-  scan:
-    name: Gitleaks and Trivy
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    scan:
+        name: Gitleaks and Trivy
+        runs-on: ubuntu-24.04
+        timeout-minutes: 15
 
-    steps:
-      - name: Checkout Target Repository
-        env:
-          NIDO_USER: ${{ secrets.NIDO_ACCOUNT_USER }}
-          NIDO_TOKEN: ${{ secrets.NIDO_ACCOUNT_PAT }}
-        run: |
-          set -euo pipefail
+        steps:
+            - name: Checkout Target Repository
+              env:
+                  NIDO_USER: ${{ secrets.NIDO_ACCOUNT_USER }}
+                  NIDO_TOKEN: ${{ secrets.NIDO_ACCOUNT_PAT }}
+              run: |
+                  set -euo pipefail
 
-          if [[ -z "$NIDO_USER" || -z "$NIDO_TOKEN" ]]; then
-            echo "::error::NIDO_USER or NIDO_ACCOUNT_PAT secret is missing."
-            exit 1
-          fi
+                  if [[ -z "$NIDO_USER" || -z "$NIDO_TOKEN" ]]; then
+                    echo "::error::NIDO_USER or NIDO_ACCOUNT_PAT secret is missing."
+                    exit 1
+                  fi
 
-          git -c http.extraheader="AUTHORIZATION: basic $(printf '%s:%s' "$NIDO_USER" "$NIDO_TOKEN" | base64 -w 0)" \
-            clone \
-            https://github.com/NIDO-MACHINERIES/nidoworkz-backend.git \
-            target-repo
+                  git -c http.extraheader="AUTHORIZATION: basic $(printf '%s:%s' "$NIDO_USER" "$NIDO_TOKEN" | base64 -w 0)" \
+                    clone \
+                    https://github.com/NIDO-MACHINERIES/nidoworkz-backend.git \
+                    target-repo
 
-      - name: Scan Git History for Secrets
-        run: |
-          docker run --rm \
-            -v "$GITHUB_WORKSPACE/target-repo:/path" \
-            -w /path \
-            ghcr.io/gitleaks/gitleaks:v8.30.1 \
-            git . --redact --no-banner
+            - name: Scan Git History for Secrets
+              id: gitleaks
+              continue-on-error: true
+              run: |
+                  docker run --rm \
+                    -v "$GITHUB_WORKSPACE:/workspace" \
+                    -w /workspace/target-repo \
+                    ghcr.io/gitleaks/gitleaks:v8.30.1 \
+                    git . \
+                      --redact \
+                      --no-banner \
+                      --report-format json \
+                      --report-path /workspace/gitleaks-report.json
 
-      - name: Install Trivy
-        uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
-        with:
-          version: latest
+            - name: Install Trivy
+              uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
+              with:
+                  version: latest
 
-      - name: Scan Filesystem with Trivy
-        run: |
-          trivy fs \
-            --scanners vuln,misconfig \
-            --severity HIGH,CRITICAL \
-            --exit-code 1 \
-            --no-progress \
-            target-repo
+            - name: Scan Filesystem with Trivy
+              id: trivy
+              continue-on-error: true
+              run: |
+                  trivy fs \
+                    --scanners vuln,misconfig \
+                    --severity HIGH,CRITICAL \
+                    --format json \
+                    --output trivy-report.json \
+                    --exit-code 1 \
+                    --no-progress \
+                    target-repo
+
+            - name: Email Security Reports
+              if: always()
+              uses: dawidd6/action-send-mail@v4
+              with:
+                  server_address: smtp.gmail.com
+                  server_port: 465
+                  secure: true
+                  username: ${{ secrets.MAIL_USERNAME }}
+                  password: ${{ secrets.MAIL_PASSWORD }}
+                  subject: "Security Scan Report - NIDOWORKZ Backend"
+                  to: ${{ secrets.MAIL_TO }}
+                  from: GitHub Security Scanner
+                  body: |
+                      NIDOWORKZ Backend Security Scan
+
+                      Repository: NIDO-MACHINERIES/nidoworkz-backend
+                      Workflow: ${{ github.workflow }}
+                      Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+                      Gitleaks result: ${{ steps.gitleaks.outcome }}
+                      Trivy result: ${{ steps.trivy.outcome }}
+
+                      The attached JSON files contain the scan reports.
+                  attachments: gitleaks-report.json,trivy-report.json
