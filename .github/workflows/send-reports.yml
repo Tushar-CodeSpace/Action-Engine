@@ -85,7 +85,7 @@ jobs:
 
         steps:
             - name: Download Report Artifact
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v7
               with:
                   name: ${{ inputs.artifact_name }}
                   path: reports
@@ -273,7 +273,7 @@ jobs:
                   PY
 
             - name: Send Email
-              uses: dawidd6/action-send-mail@v4
+              uses: dawidd6/action-send-mail@v23
               with:
                   server_address: smtp.gmail.com
                   server_port: 465

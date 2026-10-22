@@ -1,13 +1,19 @@
-name: Scan - Client - NIDO
+name: Scan - Repo - action-engine
 
 on:
+    push:
+        branches:
+            - main
+    pull_request:
+        branches:
+            - main
     workflow_dispatch:
 
 permissions:
     contents: read
 
 env:
-    TARGET_REPOSITORY: NIDO-MACHINERIES/nidoworkz-backend
+    TARGET_REPOSITORY: ${{ github.repository }}
     GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
     TRIVY_VERSION: "latest"
     TRIVY_SEVERITY: HIGH,CRITICAL
@@ -18,47 +24,23 @@ jobs:
     gitleaks:
         name: Gitleaks
         runs-on: ubuntu-24.04
-        timeout-minutes: 30
+        timeout-minutes: 15
 
         outputs:
             outcome: ${{ steps.gitleaks.outcome }}
 
         steps:
-            - name: Validate Configuration
-              shell: bash
-              run: |
-                  set -euo pipefail
-
-                  if [[ ! "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
-                    echo "::error::Invalid target repository format."
-                    exit 1
-                  fi
+            - name: Checkout Repository
+              uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
 
             - name: Prepare Report Directory
               shell: bash
               run: |
                   mkdir -p reports
                   printf '[]\n' > reports/gitleaks-report.json
-
-            - name: Checkout Target Repository
-              env:
-                  NIDO_USER: ${{ secrets.NIDO_ACCOUNT_USER }}
-                  NIDO_TOKEN: ${{ secrets.NIDO_ACCOUNT_PAT }}
-              shell: bash
-              run: |
-                  set -euo pipefail
-
-                  if [[ -z "$NIDO_USER" || -z "$NIDO_TOKEN" ]]; then
-                    echo "::error::NIDO repository credentials are missing."
-                    exit 1
-                  fi
-
-                  BASIC_AUTH="$(printf '%s:%s' "$NIDO_USER" "$NIDO_TOKEN" | base64 -w 0)"
-
-                  git -c http.extraheader="AUTHORIZATION: basic $BASIC_AUTH" \
-                    clone \
-                    "https://github.com/${TARGET_REPOSITORY}.git" \
-                    target-repo
 
             - name: Scan Git History with Gitleaks
               id: gitleaks
@@ -67,7 +49,7 @@ jobs:
               run: |
                   docker run --rm \
                     -v "$GITHUB_WORKSPACE:/workspace" \
-                    -w /workspace/target-repo \
+                    -w /workspace \
                     "$GITLEAKS_IMAGE" \
                     git . \
                     --redact \
@@ -77,7 +59,7 @@ jobs:
 
             - name: Upload Gitleaks Report
               if: always()
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v6
               with:
                   name: gitleaks-report
                   path: reports/gitleaks-report.json
@@ -96,47 +78,23 @@ jobs:
     trivy:
         name: Trivy
         runs-on: ubuntu-24.04
-        timeout-minutes: 30
+        timeout-minutes: 15
 
         outputs:
             outcome: ${{ steps.trivy.outcome }}
 
         steps:
-            - name: Validate Configuration
-              shell: bash
-              run: |
-                  set -euo pipefail
-
-                  if [[ ! "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
-                    echo "::error::Invalid target repository format."
-                    exit 1
-                  fi
+            - name: Checkout Repository
+              uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
 
             - name: Prepare Report Directory
               shell: bash
               run: |
                   mkdir -p reports
                   printf '{"Results":[]}\n' > reports/trivy-report.json
-
-            - name: Checkout Target Repository
-              env:
-                  NIDO_USER: ${{ secrets.NIDO_ACCOUNT_USER }}
-                  NIDO_TOKEN: ${{ secrets.NIDO_ACCOUNT_PAT }}
-              shell: bash
-              run: |
-                  set -euo pipefail
-
-                  if [[ -z "$NIDO_USER" || -z "$NIDO_TOKEN" ]]; then
-                    echo "::error::NIDO repository credentials are missing."
-                    exit 1
-                  fi
-
-                  BASIC_AUTH="$(printf '%s:%s' "$NIDO_USER" "$NIDO_TOKEN" | base64 -w 0)"
-
-                  git -c http.extraheader="AUTHORIZATION: basic $BASIC_AUTH" \
-                    clone \
-                    "https://github.com/${TARGET_REPOSITORY}.git" \
-                    target-repo
 
             - name: Install Trivy
               uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
@@ -155,11 +113,11 @@ jobs:
                     --output reports/trivy-report.json \
                     --exit-code 1 \
                     --no-progress \
-                    target-repo
+                    .
 
             - name: Upload Trivy Report
               if: always()
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v6
               with:
                   name: trivy-report
                   path: reports/trivy-report.json
@@ -191,10 +149,9 @@ jobs:
             total_count: ${{ steps.aggregate.outputs.total_count }}
 
         steps:
-            - name: Checkout Platform Repository
+            - name: Checkout Repository
               uses: actions/checkout@v5
               with:
-                  path: platform
                   persist-credentials: false
 
             - name: Prepare Report Directory
@@ -205,14 +162,14 @@ jobs:
                   printf '{"Results":[]}\n' > reports/trivy-report.json
 
             - name: Download Gitleaks Report
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v7
               continue-on-error: true
               with:
                   name: gitleaks-report
                   path: reports
 
             - name: Download Trivy Report
-              uses: actions/download-artifact@v4
+              uses: actions/download-artifact@v7
               continue-on-error: true
               with:
                   name: trivy-report
@@ -230,7 +187,7 @@ jobs:
                   python3 -m venv .venv
                   .venv/bin/python -m pip install openpyxl
 
-                  .venv/bin/python platform/scripts/generate_security_report.py \
+                  .venv/bin/python scripts/generate_security_report.py \
                     --gitleaks reports/gitleaks-report.json \
                     --trivy reports/trivy-report.json \
                     --output reports/security-report.xlsx \
@@ -245,7 +202,7 @@ jobs:
 
             - name: Upload Security Reports
               if: always()
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v6
               with:
                   name: security-reports
                   path: reports/
@@ -269,9 +226,9 @@ jobs:
 
         with:
             artifact_name: security-reports
-            email_subject: "Security Scan - NIDOWORKZ Backend"
+            email_subject: "Security Scan - Action Engine"
             email_body: |
-                Repository: NIDO-MACHINERIES/nidoworkz-backend
+                Repository: ${{ github.repository }}
                 Review the attached security reports.
             workflow_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             scan_status: ${{ needs.report.result }}
