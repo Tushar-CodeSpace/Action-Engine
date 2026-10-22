@@ -281,7 +281,7 @@ jobs:
                   username: ${{ secrets.MAIL_USERNAME }}
                   password: ${{ secrets.MAIL_PASSWORD }}
                   to: ${{ secrets.MAIL_TO }}
-                  from: GitHub Security Dashboard
+                  from: GitHub Security Dashboard <${{ secrets.MAIL_USERNAME }}>
                   subject: ${{ inputs.email_subject }}
                   body: ${{ inputs.email_body }}
                   html_body: file://reports/email-dashboard.html
