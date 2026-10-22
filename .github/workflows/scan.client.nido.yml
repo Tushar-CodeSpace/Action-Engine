@@ -155,14 +155,47 @@ jobs:
         uses: ./.github/workflows/send-reports.yml
         with:
             artifact_name: security-reports
-            email_subject: "Security Scan - NIDOWORKZ Backend"
+            email_subject: "Security Dashboard | NIDOWORKZ Backend"
             email_body: |
-                NIDOWORKZ Backend Security Scan
+                NIDOWORKZ SECURITY SCAN
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
                 Repository: NIDO-MACHINERIES/nidoworkz-backend
+                Scan Type: Gitleaks + Trivy
+                Trigger: GitHub Actions
+                Run ID: ${{ github.run_id }}
 
-                Review the attached Excel workbook and detailed scanner reports.
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                SCAN STATUS
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-                Workflow run:
+                Gitleaks: Review the attached report for findings
+                Trivy: Review the attached report for findings
+
+                Overall Status: Check the workflow run for the final result.
+
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                REPORTS
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+                Excel Security Dashboard:
+                Attached as security-report.xlsx
+
+                Detailed Reports:
+                - gitleaks-report.json
+                - trivy-report.json
+
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                ACTION REQUIRED
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+                Review all HIGH and CRITICAL findings.
+                Investigate exposed secrets immediately.
+                Fix vulnerabilities and misconfigurations.
+                Re-run the pipeline after remediation.
+
+                View Workflow Run:
                 ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+                Reports are attached to this email.
         secrets: inherit
