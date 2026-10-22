@@ -1,0 +1,50 @@
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local development environments
+.venv/
+venv/
+env/
+node_modules/
+__pycache__/
+*.py[cod]
+
+# Logs
+*.log
+logs/
+
+# Temporary scan reports and artifacts
+reports/
+artifacts/
+tmp/
+temp/
+
+# Test outputs and coverage
+coverage/
+.nyc_output/
+.pytest_cache/
+htmlcov/
+
+# Local IDE configuration
+.vscode/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Local tooling
+.cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated archives
+*.zip
+*.tar
+*.tar.gz
