@@ -54,6 +54,12 @@ on:
                 type: string
                 default: "N/A"
 
+            trivy_packages_count:
+                description: Number of packages scanned by Trivy
+                required: false
+                type: string
+                default: "N/A"
+
             total_count:
                 description: Total security findings
                 required: false
@@ -94,6 +100,7 @@ jobs:
                   TRIVY_STATUS: ${{ inputs.trivy_status }}
                   GITLEAKS_COUNT: ${{ inputs.gitleaks_count }}
                   TRIVY_COUNT: ${{ inputs.trivy_count }}
+                  TRIVY_PACKAGES_COUNT: ${{ inputs.trivy_packages_count }}
                   TOTAL_COUNT: ${{ inputs.total_count }}
               shell: bash
               run: |
@@ -219,6 +226,13 @@ jobs:
                                 </td>
                                 <td align="right" style="padding:11px;border:1px solid #e5e7eb;
                                     font-size:13px;font-weight:bold">{esc(get("TRIVY_COUNT"))}</td>
+                              </tr>
+                              <tr style="background:#f9fafb">
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  Trivy packages scanned
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("TRIVY_PACKAGES_COUNT"))}</td>
                               </tr>
                               <tr style="background:#f9fafb">
                                 <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">

@@ -187,6 +187,7 @@ jobs:
             trivy_status: ${{ steps.aggregate.outputs.trivy_status }}
             gitleaks_count: ${{ steps.aggregate.outputs.gitleaks_count }}
             trivy_count: ${{ steps.aggregate.outputs.trivy_count }}
+            trivy_packages_count: ${{ steps.aggregate.outputs.trivy_packages_count }}
             total_count: ${{ steps.aggregate.outputs.total_count }}
 
         steps:
@@ -278,5 +279,6 @@ jobs:
             trivy_status: ${{ needs.report.outputs.trivy_status || needs.trivy.result }}
             gitleaks_count: ${{ needs.report.outputs.gitleaks_count }}
             trivy_count: ${{ needs.report.outputs.trivy_count }}
+            trivy_packages_count: ${{ needs.report.outputs.trivy_packages_count }}
             total_count: ${{ needs.report.outputs.total_count }}
         secrets: inherit

@@ -210,6 +210,7 @@ def main():
         with open(args.github_output, "a", encoding="utf-8") as f:
             f.write(f"gitleaks_count={len(gitleaks_rows)}\n")
             f.write(f"trivy_count={len(trivy_rows)}\n")
+            f.write(f"trivy_packages_count={len(package_rows)}\n")
             f.write(f"total_count={total}\n")
 
 
