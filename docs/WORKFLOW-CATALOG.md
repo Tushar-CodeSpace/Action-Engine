@@ -18,11 +18,43 @@ This catalog distinguishes the initial implementation from future capabilities.
 - Release management
 - Reporting and governance
 
-## 3. Security Workflows
+## 3. Active Implemented Workflows
 
-### 3.1 Secret Scanning
+### 3.1 Repository Scan: Action-Engine (`scan.repo.action-engine.yml`)
 
-**Workflow:** `secret-scan-reusable.yml`
+- **File:** [`.github/workflows/scan.repo.action-engine.yml`](file:///home/snyder/DevOps/Action-Engine/.github/workflows/scan.repo.action-engine.yml)
+- **Target Repository:** `Tushar-CodeSpace/Action-Engine` (Self-scan)
+- **Triggers:** Pushes to `main`, pull requests to `main`, manual `workflow_dispatch`.
+- **Architecture:**
+  - **Job 1 (`gitleaks`)**: Clones git history with `fetch-depth: 0` and scans with Gitleaks (`ghcr.io/gitleaks/gitleaks:v8.30.1`), outputting `reports/gitleaks-report.json`. Runs concurrently with Job 2.
+  - **Job 2 (`trivy`)**: Scans repository filesystem with Trivy for vulnerabilities and misconfigurations (`vuln,misconfig`) using severity filter `HIGH,CRITICAL`, outputting `reports/trivy-report.json`. Runs concurrently with Job 1.
+  - **Job 3 (`report`)**: Executes after `[gitleaks, trivy]` finish (`if: always()`). Downloads artifacts via `actions/download-artifact@v7`, generates an Excel dashboard via `scripts/generate_security_report.py`, uploads the consolidated `security-reports` artifact via `actions/upload-artifact@v6`, and fails if either scanner detected findings.
+  - **Job 4 (`email`)**: Calls `send-reports.yml` (`if: always()`) to build an HTML status card dashboard and email the report and attachments.
+
+### 3.2 Target Repository Scan: NIDOWORKZ Backend (`scan.repo.nidoworkz-backend.yml`)
+
+- **File:** [`.github/workflows/scan.repo.nidoworkz-backend.yml`](file:///home/snyder/DevOps/Action-Engine/.github/workflows/scan.repo.nidoworkz-backend.yml)
+- **Target Repository:** `NIDO-MACHINERIES/nidoworkz-backend`
+- **Triggers:** Manual `workflow_dispatch`.
+- **Authentication:** Authenticates to private target repository using `NIDO_ACCOUNT_USER` and `NIDO_ACCOUNT_PAT` repository secrets.
+- **Architecture:** Mirrors the 4-stage parallel scanning, Excel aggregation, and email alerting pipeline of `scan.repo.action-engine.yml`.
+
+### 3.3 Reusable Email Reporting: Send Pipeline Reports (`send-reports.yml`)
+
+- **File:** [`.github/workflows/send-reports.yml`](file:///home/snyder/DevOps/Action-Engine/.github/workflows/send-reports.yml)
+- **Trigger:** `workflow_call` (invoked by scanning workflows).
+- **Inputs:** `artifact_name`, `email_subject`, `email_body`, `workflow_url`, `scan_status`, `gitleaks_status`, `trivy_status`, `gitleaks_count`, `trivy_count`, `trivy_packages_count`, `total_count`.
+- **Secrets:** `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_TO`.
+- **Outputs & Actions:**
+  - Downloads the report artifact.
+  - Renders a styled HTML dashboard containing responsive status badges (`GITLEAKS`, `TRIVY`, `PIPELINE`) and a breakdown table with findings counts and total packages analyzed.
+  - Sends emails with reports attached via `dawidd6/action-send-mail@v23`.
+
+---
+
+## 4. Security Workflows (Catalog & Planned Capabilities)
+
+### 4.1 Secret Scanning
 
 **Tool:** Gitleaks
 

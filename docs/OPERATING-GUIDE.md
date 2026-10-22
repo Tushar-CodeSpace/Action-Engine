@@ -86,4 +86,29 @@ Verify:
 
 Determine whether the result is a genuine security issue or a false positive.
 
-Do not disable the scanner simply to obtain
+Do not disable the scanner simply to obtain a green pipeline. Instead:
+1. Download the generated `security-reports` artifact from the workflow run or review the email attachment `security-report.xlsx`.
+2. Inspect the specific rule ID, commit SHA, file path, and line numbers flagged.
+3. If genuine:
+   - For secrets: Invalidate/rotate the credential immediately, purge it from repository history if required, and commit remediated code.
+   - For dependencies: Update the package in `package.json` / `requirements.txt` to a patched version.
+4. If a false positive or acceptable risk:
+   - For Gitleaks: Add the fingerprint or path to `.gitleaksignore` in the target repository root.
+   - For Trivy: Add an approved `.trivyignore` entry with documented justification.
+
+### 5.4 Understanding Metrics: Packages Scanned vs. Findings Count
+
+- **Packages Scanned (Inventory / SBOM)**: Shows the total number of dependencies analyzed by Trivy across package manifests (e.g. `package-lock.json`, `requirements.txt`).
+- **Findings Count**: Represents the actual security vulnerabilities or misconfigurations discovered that match the configured severity threshold (`TRIVY_SEVERITY: HIGH,CRITICAL`).
+- Having 600+ packages scanned and 0 findings means all 600+ dependencies were checked and none contained active High or Critical vulnerabilities.
+
+### 5.5 Email Notification Troubleshooting
+
+If the email notification step fails:
+1. Verify repository secrets:
+   - `MAIL_USERNAME`: SMTP user / email address (e.g. Gmail address).
+   - `MAIL_PASSWORD`: SMTP App Password (do not use raw Google account password; generate an App Password in Google Account Security).
+   - `MAIL_TO`: Destination email address(es), comma-separated.
+2. Check sender address formatting:
+   - `from` must be a valid email or `Sender Name <email@domain.com>`.
+3. Check workflow run logs under the `Security Reports / Send Email` job for SMTP connection or authentication error codes.

@@ -49,7 +49,7 @@ Maintaining separate implementations of the same security pipeline across many r
 
 ### Decision
 
-Maintain shared workflow implementations in the central `devsecops-platform` repository.
+Maintain shared workflow implementations in the central `Action-Engine` repository.
 
 Application repositories will invoke these workflows through small caller workflows.
 

@@ -57,18 +57,38 @@ The architecture minimizes infrastructure management and provides a standardized
 
 ### 4.1 Central Platform Repository
 
-Repository name: `devsecops-platform`
+Repository name: `Action-Engine`
 
 Responsibilities:
 
-- Maintain reusable workflows.
+- Maintain central and client scanning workflows.
+- Provide the reusable notification and dashboard workflow (`send-reports.yml`).
 - Define common security policies.
 - Maintain workflow documentation.
 - Manage workflow versions.
 - Provide repository onboarding instructions.
-- Maintain shared scripts and configuration where needed.
+- Maintain shared scripts (such as `scripts/generate_security_report.py`).
 
 This repository is the central source of truth for shared DevSecOps automation.
+
+### 4.2 Pipeline Execution Architecture
+
+Each scanning workflow follows a 4-stage job pipeline:
+
+```mermaid
+flowchart TD
+    Trigger([Trigger: Push / PR / Dispatch]) --> Gitleaks[Job 1: Gitleaks<br/>Scan Git History in Docker<br/>Generates gitleaks-report.json]
+    Trigger --> Trivy[Job 2: Trivy<br/>Scan Filesystem & SBOM<br/>Generates trivy-report.json]
+
+    Gitleaks -->|Artifact: gitleaks-report| Report[Job 3: Report Aggregator<br/>Python + openpyxl<br/>Generates security-report.xlsx<br/>Enforces quality gate]
+    Trivy -->|Artifact: trivy-report| Report
+
+    Report -->|Artifact: security-reports| Email[Job 4: Email Notification<br/>send-reports.yml<br/>Delivers HTML Dashboard & Reports]
+```
+
+1. **Parallel Scanners (`gitleaks`, `trivy`)**: Execute concurrently on separate runners to reduce overall pipeline execution time.
+2. **Aggregator (`report`)**: Downloads both scanner outputs, compiles a unified multi-sheet Excel dashboard, sets `$GITHUB_OUTPUT` metrics, uploads the bundled `security-reports` artifact, and acts as the quality gate.
+3. **Notifier (`email`)**: Executes `if: always()` after the aggregator to deliver styled HTML dashboards and attachments to designated stakeholders.
 
 ### 4.2 Application Repositories
 
@@ -130,7 +150,7 @@ A developer pushes a branch and creates a pull request against the target reposi
 
 ### Step 2: Caller Workflow Starts
 
-The application's GitHub Actions workflow invokes the relevant reusable workflow from `devsecops-platform`.
+The application's GitHub Actions workflow invokes the relevant reusable workflow from `Action-Engine`.
 
 ### Step 3: Runner Is Provisioned
 
@@ -169,7 +189,7 @@ permissions:
 
 jobs:
   secret-scan:
-    uses: ORGANIZATION/devsecops-platform/.github/workflows/secret-scan-reusable.yml@VERSION
+    uses: ORGANIZATION/Action-Engine/.github/workflows/secret-scan-reusable.yml@VERSION
 ```
 
 Replace `ORGANIZATION` and `VERSION` with the actual owner and a reviewed release tag or full commit SHA.

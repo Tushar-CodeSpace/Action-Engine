@@ -2,51 +2,84 @@
 
 ## 1. Purpose
 
-This directory contains small, reusable helper scripts that support the DevSecOps Platform's GitHub Actions workflows.
+This directory contains reusable helper scripts that support Action-Engine's GitHub Actions workflows.
 
-Scripts should be introduced only when they simplify repeated tasks or provide functionality that is difficult to express clearly using native GitHub Actions steps.
+Scripts are introduced only when they simplify repeated tasks, generate complex formatted artifacts (such as multi-tab Excel reports), or provide functionality difficult to express clearly in pure YAML.
 
-## 2. Design Principles
+---
 
-- Keep scripts small and focused.
+## 2. Implemented Scripts
+
+### 2.1 `generate_security_report.py`
+
+**Purpose:**
+Parses raw JSON scan reports from **Gitleaks** and **Trivy**, compiling them into a standardized, styled multi-tab Excel workbook (`.xlsx`) with an executive summary dashboard. It also dynamically writes scanner metric counts to GitHub Actions step outputs (`$GITHUB_OUTPUT`).
+
+**Supported Sheets in Excel Report:**
+1. **Executive Summary**:
+   - Repository name, scan timestamp, workflow run URL, and interpretation guide.
+   - Status cards for Gitleaks and Trivy.
+   - High-level findings breakdown.
+   - Trivy vulnerability severity breakdown (CRITICAL, HIGH, MEDIUM, LOW, UNKNOWN).
+2. **Gitleaks Findings**:
+   - Columns: `Rule ID`, `Description`, `File`, `Start Line`, `Commit`, `Author`, `Date`.
+3. **Trivy Findings**:
+   - Columns: `Finding Type`, `ID`, `Package / Type`, `Installed Version`, `Fixed Version`, `Severity`, `Target File`, `Title`.
+4. **Trivy Packages**:
+   - Columns: `Package`, `Version`, `Type`, `Target File` (full SBOM / dependency inventory).
+
+**Dependencies:**
+- Python 3.8+
+- `openpyxl` (`pip install openpyxl`)
+
+**CLI Arguments:**
+
+| Flag | Required | Description |
+|---|---|---|
+| `--gitleaks` | Yes | Path to Gitleaks JSON report (e.g. `reports/gitleaks-report.json`) |
+| `--trivy` | Yes | Path to Trivy JSON report (e.g. `reports/trivy-report.json`) |
+| `--output` | Yes | Path for output Excel file (e.g. `reports/security-report.xlsx`) |
+| `--repository` | No | Target repository identifier (e.g. `owner/repo`) |
+| `--gitleaks-status` | No | Reported status of Gitleaks (`success`, `failure`, etc.) |
+| `--trivy-status` | No | Reported status of Trivy (`success`, `failure`, etc.) |
+| `--workflow-url` | No | Direct URL to the GitHub Actions workflow run |
+| `--github-output` | No | Path to `$GITHUB_OUTPUT` file for exporting environment variables |
+
+**Exported GitHub Output Metrics:**
+When `--github-output "$GITHUB_OUTPUT"` is provided, the script appends:
+- `gitleaks_count`: Number of leaked secrets found.
+- `trivy_count`: Number of vulnerabilities and misconfigurations found.
+- `trivy_packages_count`: Number of analyzed dependencies/packages scanned.
+- `total_count`: Combined sum of Gitleaks and Trivy findings.
+
+**Usage Example:**
+```bash
+python3 -m venv .venv
+.venv/bin/pip install openpyxl
+.venv/bin/python scripts/generate_security_report.py \
+  --gitleaks reports/gitleaks-report.json \
+  --trivy reports/trivy-report.json \
+  --output reports/security-report.xlsx \
+  --repository "NIDO-MACHINERIES/nidoworkz-backend" \
+  --gitleaks-status "failure" \
+  --trivy-status "success" \
+  --workflow-url "https://github.com/Tushar-CodeSpace/Action-Engine/actions/runs/12345" \
+  --github-output "$GITHUB_OUTPUT"
+```
+
+---
+
+## 3. Design Principles
+
+- Keep scripts small, predictable, and focused.
 - Prefer native GitHub Actions functionality when practical.
-- Reuse scripts across workflows rather than duplicating logic.
 - Use predictable inputs, outputs, and exit codes.
-- Avoid unnecessary external dependencies.
-- Document usage and limitations.
 - Never embed credentials or sensitive values.
 - Keep execution safe for untrusted pull request content.
 
-## 3. Planned Script Categories
+---
 
-Examples of future helper scripts include:
-
-| Category | Purpose |
-|---|---|
-| Repository validation | Validate required project files and configuration |
-| Report processing | Produce concise, safe workflow summaries |
-| Policy validation | Check configuration against platform standards |
-| Version validation | Validate version and release conventions |
-| Workflow utilities | Provide shared, narrowly scoped automation |
-
-These are planned categories, not implemented scripts.
-
-## 4. Script Requirements
-
-Every script should:
-
-- Have a clearly defined responsibility.
-- Validate required inputs.
-- Handle errors explicitly.
-- Return a meaningful exit code.
-- Avoid printing credentials or sensitive information.
-- Avoid modifying application repositories unless explicitly required.
-- Include safe test cases.
-- Document any dependencies.
-
-## 5. Exit Code Standards
-
-Use conventional exit codes:
+## 4. Exit Code Standards
 
 | Exit code | Meaning |
 |---|---|
@@ -54,55 +87,3 @@ Use conventional exit codes:
 | Non-zero | Validation, execution, or processing failed |
 
 Scripts must not return success when a required security operation fails.
-
-Where practical, error messages should distinguish invalid input, execution errors, and detected policy violations.
-
-## 6. Security Requirements
-
-- Never hardcode API keys, passwords, or access tokens.
-- Avoid logging environment variables or sensitive files.
-- Validate inputs before using them in shell commands.
-- Avoid unsafe evaluation of dynamically constructed commands.
-- Do not execute untrusted downloaded scripts.
-- Use minimal filesystem and network access.
-- Treat repository content as untrusted input.
-- Do not write unredacted secret-scanning results to persistent artifacts.
-
-## 7. Testing
-
-Test scripts against:
-
-- Valid inputs.
-- Missing required inputs.
-- Invalid configuration.
-- Unexpected file contents.
-- Expected error conditions.
-- Sensitive-data handling.
-
-Use synthetic test data for security-related tests.
-
-## 8. Documentation Template
-
-Each script should include documentation covering:
-
-- Name and purpose.
-- Required inputs.
-- Optional inputs.
-- Dependencies.
-- Expected outputs.
-- Exit codes.
-- Security considerations.
-- Usage example.
-- Test instructions.
-
-## 9. Maintenance
-
-Scripts should be reviewed whenever their associated workflows change.
-
-Remove scripts that are no longer used, and update documentation when behavior or interfaces change.
-
-## 10. Conclusion
-
-Shared scripts should reduce complexity rather than create another framework to maintain.
-
-Keep the platform workflow-first, introducing helper scripts only when they provide a clear benefit.

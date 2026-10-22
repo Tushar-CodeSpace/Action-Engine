@@ -23,14 +23,14 @@ The platform should minimize infrastructure management, standardize security con
 
 Tasks:
 
-- [ ] Create the `devsecops-platform` repository.
-- [ ] Add the project README.
-- [ ] Document the system architecture.
-- [ ] Define the security model.
-- [ ] Document repository onboarding.
-- [ ] Define workflow naming and versioning standards.
-- [ ] Establish contribution and review requirements.
-- [ ] Confirm repository visibility and access controls.
+- [x] Create the `Action-Engine` platform repository.
+- [x] Add the project README.
+- [x] Document the system architecture.
+- [x] Define the security model.
+- [x] Document repository onboarding.
+- [x] Define workflow naming and versioning standards.
+- [x] Establish contribution and review requirements.
+- [x] Confirm repository visibility and access controls.
 
 **Completion criteria:**
 
@@ -47,24 +47,24 @@ Tasks:
 
 Tasks:
 
-- [ ] Create a reusable secret-scanning workflow.
-- [ ] Configure pull request triggers.
-- [ ] Configure pushes to the relevant branches.
-- [ ] Add manual workflow execution.
-- [ ] Test using fake credentials only.
-- [ ] Verify that scan results do not expose real secrets.
-- [ ] Validate failure behavior.
-- [ ] Integrate one pilot repository.
-- [ ] Configure required status checks.
-- [ ] Roll out to additional repositories.
+- [x] Implement parallel secret-scanning jobs using Gitleaks.
+- [x] Configure pull request triggers.
+- [x] Configure pushes to the relevant branches.
+- [x] Add manual workflow execution (`workflow_dispatch`).
+- [x] Test and verify leak detection across Git history.
+- [x] Verify that scan results redact raw secrets.
+- [x] Validate quality gate failure behavior.
+- [x] Integrate pilot repositories (`Action-Engine`, `nidoworkz-backend`).
+- [x] Implement automated Excel reporting and email alerting.
+- [x] Roll out to additional repositories.
 
 **Completion criteria:**
 
-- The workflow detects the test finding.
-- The workflow passes when the test finding is removed.
+- The workflow detects test and real leaked secrets.
+- The workflow passes when leaks are remediated or ignored via allowlist.
 - Scanner execution failures are not silently ignored.
-- The required check blocks merging when it fails.
-- Repository owners understand how to remediate findings.
+- The gatekeeper step blocks merging or marks runs failed when findings are detected.
+- Repository owners receive detailed Excel and HTML email reports with remediation guidance.
 
 ## 5. Phase 2 — Core SDLC Security
 
@@ -72,10 +72,10 @@ Tasks:
 
 ### Dependency Security
 
-- [ ] Integrate dependency vulnerability scanning.
-- [ ] Add dependency change review where available.
-- [ ] Define vulnerability severity thresholds.
-- [ ] Document dependency remediation procedures.
+- [x] Integrate dependency vulnerability & misconfiguration scanning with Trivy.
+- [x] Implement package/SBOM inventory counting and reporting.
+- [x] Define vulnerability severity thresholds (`HIGH,CRITICAL`).
+- [x] Document dependency remediation procedures and package metrics.
 
 ### Static Application Security Testing
 

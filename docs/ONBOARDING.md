@@ -12,7 +12,7 @@ Before onboarding a repository, ensure that:
 
 - The application repository is hosted on GitHub.
 - GitHub Actions is enabled.
-- The central `devsecops-platform` repository exists.
+- The central `Action-Engine` platform repository exists.
 - The reusable security workflow has been reviewed and committed.
 - The application repository is permitted to access the reusable workflow.
 - The person configuring the integration has the required repository permissions.
@@ -69,7 +69,7 @@ permissions:
 
 jobs:
   secret-scan:
-    uses: ORGANIZATION/devsecops-platform/.github/workflows/secret-scan-reusable.yml@VERSION
+    uses: ORGANIZATION/Action-Engine/.github/workflows/secret-scan-reusable.yml@VERSION
 ```
 
 Replace:
