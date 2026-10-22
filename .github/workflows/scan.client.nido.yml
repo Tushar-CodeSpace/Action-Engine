@@ -256,3 +256,23 @@ jobs:
                     echo "::error::At least one scanner failed or reported findings. Review the scan logs and reports."
                     exit 1
                   fi
+    email:
+        name: Email Security Reports
+        needs: scan
+        if: always()
+        uses: ./.github/workflows/send-reports.yml
+        with:
+            artifact_name: security-reports
+            email_subject: "Security Scan - NIDOWORKZ Backend"
+            email_body: |
+                NIDOWORKZ Backend Security Scan
+
+                Repository: NIDO-MACHINERIES/nidoworkz-backend
+
+                The security scan has completed.
+                Download the attached Excel workbook for the summary dashboard
+                and detailed Gitleaks and Trivy findings.
+
+                Workflow run:
+                ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        secrets: inherit
