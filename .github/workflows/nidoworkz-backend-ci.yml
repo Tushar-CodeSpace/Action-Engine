@@ -25,6 +25,7 @@ jobs:
                   token: ${{env.TARGET_REPO_PAT}}
                   path: ${{env.TARGET_DIR}}
                   persist-credentials: false
+                  clean: true
 
             - name: show files
               run: |
