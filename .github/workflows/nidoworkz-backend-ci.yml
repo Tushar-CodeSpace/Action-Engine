@@ -10,6 +10,7 @@ env:
     TARGET_REPO: NIDO-MACHINERIES/nidoworkz-backend
     TARGET_REPO_USER: ${{secrets.NIDO_ACCOUNT_USER}}
     TARGET_REPO_PAT: ${{secrets.NIDO_ACCOUNT_PAT}}
+    TARGET_DIR: ./nidoworkz-backend
 
 jobs:
     dockerization:
@@ -22,9 +23,9 @@ jobs:
               with:
                   repository: ${{env.TARGET_REPO}}
                   token: ${{env.TARGET_REPO_PAT}}
-                  path: nidoworkz-backend
+                  path: ${{env.TARGET_DIR}}
                   persist-credentials: false
-            
+
             - name: show files
               run: |
-                  ls -la
+                  ls -la ${{env.TARGET_DIR}}
