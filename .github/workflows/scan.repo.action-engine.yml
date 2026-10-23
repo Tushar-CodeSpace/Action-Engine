@@ -351,4 +351,7 @@ jobs:
             trivy_packages_count: ${{ needs.report.outputs.trivy_packages_count }}
             semgrep_count: ${{ needs.report.outputs.semgrep_count }}
             total_count: ${{ needs.report.outputs.total_count }}
-        secrets: inherit
+        secrets:
+            MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+            MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+            MAIL_TO: ${{ secrets.MAIL_TO }}
