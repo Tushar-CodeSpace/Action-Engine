@@ -202,10 +202,10 @@ jobs:
                           <tr>
                             <td style="background:#111827;padding:24px;color:#ffffff">
                               <div style="font-size:12px;letter-spacing:1.5px;color:#cbd5e1">
-                                SECURITY OPERATIONS
+                                ACTION ENGINE
                               </div>
                               <h1 style="font-size:24px;line-height:1.3;margin:10px 0 6px">
-                                Security Scan Dashboard
+                                Action Engine Security Dashboard
                               </h1>
                               <div style="font-size:14px;color:#d1d5db">{esc(subject)}</div>
                             </td>
@@ -318,7 +318,7 @@ jobs:
                   username: ${{ secrets.MAIL_USERNAME }}
                   password: ${{ secrets.MAIL_PASSWORD }}
                   to: ${{ secrets.MAIL_TO }}
-                  from: GitHub Security Dashboard <${{ secrets.MAIL_USERNAME }}>
+                  from: Action Engine <${{ secrets.MAIL_USERNAME }}>
                   subject: ${{ inputs.email_subject }}
                   body: ${{ inputs.email_body }}
                   html_body: file://reports/email-dashboard.html
