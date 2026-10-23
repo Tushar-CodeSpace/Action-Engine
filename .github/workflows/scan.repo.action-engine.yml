@@ -162,10 +162,10 @@ jobs:
               shell: bash
               run: |
                   docker run --rm \
-                    -v "$GITHUB_WORKSPACE:/workspace" \
-                    -w /workspace \
+                    -v "$GITHUB_WORKSPACE:/src" \
+                    -w /src \
                     "$SEMGREP_IMAGE" \
-                    semgrep scan --config auto --json --output reports/semgrep-report.json
+                    semgrep scan --config auto --error --json --output /src/reports/semgrep-report.json
 
             - name: Upload Semgrep Report
               if: always()
