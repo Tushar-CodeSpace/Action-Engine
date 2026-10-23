@@ -1,0 +1,26 @@
+name: NidoWorkZ Backend CI
+
+on:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+env:
+    TARGET_REPO: NIDO-MACHINERIES/nidoworkz-backend
+    TARGET_REPO_USER: ${{secrets.NIDO_ACCOUNT_USER}}
+    TARGET_REPO_PAT: ${{secrets.NIDO_ACCOUNT_PAT}}
+
+jobs:
+    dockerization:
+        name: Dockerization
+        runs-on: [self-hosted, ActionEngine]
+        timeout-minutes: 30
+        steps:
+            - name: Checkout Target Repo
+              uses: actions/checkout@v5
+              with:
+                  repository: ${{env.TARGET_REPO}}
+                  token: ${{env.TARGET_REPO_PAT}}
+                  path: nidoworkz-backend
+                  persist-credentials: false
