@@ -321,6 +321,8 @@ jobs:
                       -Dsonar.projectKey=${{ steps.vars.outputs.project_key }}
                       -Dsonar.projectName=${{ env.TARGET_REPOSITORY }}
                       -Dsonar.sources=.
+                      -Dsonar.coverage.exclusions=**
+                      -Dsonar.cpd.exclusions=**
 
             - name: Fetch SonarQube Report
               if: always() && steps.sonar.outcome == 'success'

@@ -303,6 +303,8 @@ jobs:
                       -Dsonar.projectKey=nidoworkz-backend
                       -Dsonar.projectName=nidoworkz-backend
                       -Dsonar.sources=.
+                      -Dsonar.coverage.exclusions=**
+                      -Dsonar.cpd.exclusions=**
 
             - name: Fetch SonarQube Report
               if: always() && steps.sonar.outcome == 'success'

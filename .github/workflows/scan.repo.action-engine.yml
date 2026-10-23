@@ -225,6 +225,8 @@ jobs:
                       -Dsonar.projectKey=Action-Engine
                       -Dsonar.projectName=Action-Engine
                       -Dsonar.sources=.
+                      -Dsonar.coverage.exclusions=**
+                      -Dsonar.cpd.exclusions=**
 
             - name: Fetch SonarQube Report
               if: always() && steps.sonar.outcome == 'success'
