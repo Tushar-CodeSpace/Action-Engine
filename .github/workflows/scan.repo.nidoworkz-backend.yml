@@ -1,4 +1,5 @@
 name: Scan - Repo - nidoworkz-backend
+run-name: "Scan - Repo: nidoworkz-backend"
 
 on:
     workflow_dispatch:

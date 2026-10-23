@@ -1,4 +1,5 @@
 name: Scan - Repo - Public Custom
+run-name: "Scan - Public Repo: ${{ inputs.repository }}${{ inputs.branch != '' && format(' ({0})', inputs.branch) || '' }}"
 
 on:
     workflow_dispatch:
