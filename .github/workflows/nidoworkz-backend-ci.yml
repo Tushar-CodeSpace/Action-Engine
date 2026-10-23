@@ -24,3 +24,7 @@ jobs:
                   token: ${{env.TARGET_REPO_PAT}}
                   path: nidoworkz-backend
                   persist-credentials: false
+            
+            - name: show files
+              run: |
+                  ls -la
