@@ -2,7 +2,7 @@ name: NidoWorkZ Backend CI
 
 on:
     push:
-        branches: 
+        branches:
             - "**"
     workflow_dispatch:
 
@@ -32,6 +32,21 @@ jobs:
                   persist-credentials: false
                   clean: true
 
-            - name: show files
-              run: |
-                  ls -la ${{env.TARGET_DIR}}
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Build Base Image
+              uses: docker/build-push-action@v6
+              with:
+                  context: ${{ env.TARGET_DIR }}
+                  file: ${{ env.TARGET_DIR }}/Dockerfile.base
+                  push: false
+                  tags: nidoworkz-base:v0.1
+
+            - name: Build ADI Image
+              uses: docker/build-push-action@v6
+              with:
+                  context: ${{ env.TARGET_DIR }}/app-device-interface
+                  file: ${{ env.TARGET_DIR }}/app-device-interface/Dockerfile
+                  push: false
+                  tags: nidoworkz-adi:v0.1
