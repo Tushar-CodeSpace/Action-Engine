@@ -1,6 +1,9 @@
 name: NidoWorkZ Backend CI
 
 on:
+    push:
+        branches: 
+            - "**"
     workflow_dispatch:
 
 permissions:
@@ -8,6 +11,7 @@ permissions:
 
 env:
     TARGET_REPO: NIDO-MACHINERIES/nidoworkz-backend
+    TARGET_BRANCH: feature/NIT-314/document-service-db-configs
     TARGET_REPO_USER: ${{secrets.NIDO_ACCOUNT_USER}}
     TARGET_REPO_PAT: ${{secrets.NIDO_ACCOUNT_PAT}}
     TARGET_DIR: ./nidoworkz-backend
@@ -22,6 +26,7 @@ jobs:
               uses: actions/checkout@v5
               with:
                   repository: ${{env.TARGET_REPO}}
+                  ref: ${{env.TARGET_BRANCH}}
                   token: ${{env.TARGET_REPO_PAT}}
                   path: ${{env.TARGET_DIR}}
                   persist-credentials: false
