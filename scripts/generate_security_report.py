@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reusable Excel report generator for Gitleaks and Trivy JSON outputs."""
+"""Reusable Excel report generator for Gitleaks, Trivy, Semgrep, and SonarQube."""
 import argparse
 import json
 from datetime import datetime, timezone
@@ -84,6 +84,30 @@ def parse_trivy(data):
     return rows, counts, packages
 
 
+def parse_semgrep(data):
+    if not isinstance(data, dict):
+        return []
+    rows = []
+    for item in data.get("results", []) or []:
+        if not isinstance(item, dict):
+            continue
+        check_id = item.get("check_id", "")
+        path = item.get("path", "")
+        start_line = item.get("start", {}).get("line", "")
+        extra = item.get("extra", {})
+        message = extra.get("message", "")
+        severity = str(extra.get("severity", "WARNING")).upper()
+        metadata = extra.get("metadata", {})
+        cwe = metadata.get("cwe", [])
+        cwe_str = ", ".join(cwe) if isinstance(cwe, list) else str(cwe)
+        owasp = metadata.get("owasp", [])
+        owasp_str = ", ".join(owasp) if isinstance(owasp, list) else str(owasp)
+        rows.append([
+            check_id, severity, path, start_line, cwe_str, owasp_str, message
+        ])
+    return rows
+
+
 def add_sheet(wb, title, headers, rows):
     ws = wb.create_sheet(title)
     ws.append(headers)
@@ -122,7 +146,7 @@ def style_workbook(wb):
     summary.column_dimensions["A"].width = 30
     summary.column_dimensions["B"].width = 85
     summary.conditional_formatting.add(
-        "B12:B16",
+        "B14:B18",
         CellIsRule(
             operator="greaterThan",
             formula=["0"],
@@ -136,22 +160,27 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gitleaks", default="reports/gitleaks-report.json")
     parser.add_argument("--trivy", default="reports/trivy-report.json")
+    parser.add_argument("--semgrep", default="reports/semgrep-report.json")
     parser.add_argument("--output", default="reports/security-report.xlsx")
     parser.add_argument("--repository", default="unknown/unknown")
     parser.add_argument("--gitleaks-status", default="unknown")
     parser.add_argument("--trivy-status", default="unknown")
+    parser.add_argument("--semgrep-status", default="unknown")
+    parser.add_argument("--sonarqube-status", default="unknown")
     parser.add_argument("--workflow-url", default="")
     parser.add_argument("--github-output", default="")
     args = parser.parse_args()
 
     gitleaks = load_json(args.gitleaks, [])
     trivy = load_json(args.trivy, {})
+    semgrep = load_json(args.semgrep, {})
     if not isinstance(gitleaks, list):
         gitleaks = []
 
     gitleaks_rows = parse_gitleaks(gitleaks)
     trivy_rows, severity_counts, package_rows = parse_trivy(trivy)
-    total = len(gitleaks_rows) + len(trivy_rows)
+    semgrep_rows = parse_semgrep(semgrep)
+    total = len(gitleaks_rows) + len(trivy_rows) + len(semgrep_rows)
 
     wb = Workbook()
     summary = wb.active
@@ -165,7 +194,10 @@ def main():
         ["Trivy status", args.trivy_status],
         ["Trivy findings", len(trivy_rows)],
         ["Trivy packages analyzed", len(package_rows)],
-        ["Total findings", total],
+        ["Semgrep SAST status", args.semgrep_status],
+        ["Semgrep SAST findings", len(semgrep_rows)],
+        ["SonarQube status", args.sonarqube_status],
+        ["Total security findings", total],
         ["", ""],
         ["TRIVY SEVERITY BREAKDOWN", "Count"],
         ["CRITICAL", severity_counts.get("CRITICAL", 0)],
@@ -194,6 +226,12 @@ def main():
         ["Package", "Version", "Type", "Target File"],
         package_rows,
     )
+    add_sheet(
+        wb,
+        "Semgrep SAST Findings",
+        ["Rule ID", "Severity", "File", "Line", "CWE", "OWASP", "Message"],
+        semgrep_rows,
+    )
     style_workbook(wb)
 
     output = Path(args.output)
@@ -204,6 +242,7 @@ def main():
     print(f"Gitleaks findings: {len(gitleaks_rows)}")
     print(f"Trivy findings: {len(trivy_rows)}")
     print(f"Trivy packages analyzed: {len(package_rows)}")
+    print(f"Semgrep SAST findings: {len(semgrep_rows)}")
     print(f"Total findings: {total}")
 
     if args.github_output:
@@ -211,6 +250,7 @@ def main():
             f.write(f"gitleaks_count={len(gitleaks_rows)}\n")
             f.write(f"trivy_count={len(trivy_rows)}\n")
             f.write(f"trivy_packages_count={len(package_rows)}\n")
+            f.write(f"semgrep_count={len(semgrep_rows)}\n")
             f.write(f"total_count={total}\n")
 
 

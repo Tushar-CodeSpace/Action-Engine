@@ -15,9 +15,11 @@ permissions:
 env:
     TARGET_REPOSITORY: ${{ github.repository }}
     GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
+    SEMGREP_IMAGE: semgrep/semgrep:latest
     TRIVY_VERSION: "latest"
     TRIVY_SEVERITY: HIGH,CRITICAL
     TRIVY_SCANNERS: vuln,misconfig
+    SONAR_HOST_URL: "http://localhost:9000"
     REPORT_RETENTION_DAYS: "14"
 
 jobs:
@@ -133,9 +135,99 @@ jobs:
                     exit 1
                   fi
 
+    semgrep:
+        name: Semgrep SAST
+        runs-on: ubuntu-24.04
+        timeout-minutes: 15
+
+        outputs:
+            outcome: ${{ steps.semgrep.outcome }}
+
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Prepare Report Directory
+              shell: bash
+              run: |
+                  mkdir -p reports
+                  printf '{"results":[]}\n' > reports/semgrep-report.json
+
+            - name: Scan Code with Semgrep SAST
+              id: semgrep
+              continue-on-error: true
+              shell: bash
+              run: |
+                  docker run --rm \
+                    -v "$GITHUB_WORKSPACE:/workspace" \
+                    -w /workspace \
+                    "$SEMGREP_IMAGE" \
+                    semgrep scan --config auto --json --output reports/semgrep-report.json
+
+            - name: Upload Semgrep Report
+              if: always()
+              uses: actions/upload-artifact@v6
+              with:
+                  name: semgrep-report
+                  path: reports/semgrep-report.json
+                  if-no-files-found: warn
+                  retention-days: 1
+
+            - name: Check Semgrep Outcome
+              if: always()
+              shell: bash
+              run: |
+                  if [[ "${{ steps.semgrep.outcome }}" != "success" ]]; then
+                    echo "::error::Semgrep detected security findings or encountered an error."
+                    exit 1
+                  fi
+
+    sonarqube:
+        name: SonarQube
+        runs-on: [self-hosted, ActionEngine]
+        timeout-minutes: 15
+
+        outputs:
+            outcome: ${{ steps.sonar.outcome || steps.check_token.outputs.status }}
+
+        steps:
+            - name: Checkout Repository
+              uses: actions/checkout@v5
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+
+            - name: Verify SonarQube Credentials
+              id: check_token
+              shell: bash
+              run: |
+                  if [[ -z "${{ secrets.SONAR_TOKEN }}" ]]; then
+                    echo "::warning::SONAR_TOKEN is not configured. SonarQube analysis skipped."
+                    echo "status=skipped" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "status=configured" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: SonarQube Scan
+              id: sonar
+              if: steps.check_token.outputs.status == 'configured'
+              continue-on-error: true
+              uses: SonarSource/sonarqube-scan-action@v8
+              env:
+                  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+                  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || env.SONAR_HOST_URL }}
+              with:
+                  args: >
+                      -Dsonar.projectKey=Action-Engine
+                      -Dsonar.projectName=Action-Engine
+                      -Dsonar.sources=.
+
     report:
         name: Generate Security Reports
-        needs: [gitleaks, trivy]
+        needs: [gitleaks, trivy, semgrep, sonarqube]
         if: always()
         runs-on: ubuntu-24.04
         timeout-minutes: 15
@@ -143,9 +235,12 @@ jobs:
         outputs:
             gitleaks_status: ${{ steps.aggregate.outputs.gitleaks_status }}
             trivy_status: ${{ steps.aggregate.outputs.trivy_status }}
+            semgrep_status: ${{ steps.aggregate.outputs.semgrep_status }}
+            sonarqube_status: ${{ steps.aggregate.outputs.sonarqube_status }}
             gitleaks_count: ${{ steps.aggregate.outputs.gitleaks_count }}
             trivy_count: ${{ steps.aggregate.outputs.trivy_count }}
             trivy_packages_count: ${{ steps.aggregate.outputs.trivy_packages_count }}
+            semgrep_count: ${{ steps.aggregate.outputs.semgrep_count }}
             total_count: ${{ steps.aggregate.outputs.total_count }}
 
         steps:
@@ -160,6 +255,7 @@ jobs:
                   mkdir -p reports
                   printf '[]\n' > reports/gitleaks-report.json
                   printf '{"Results":[]}\n' > reports/trivy-report.json
+                  printf '{"results":[]}\n' > reports/semgrep-report.json
 
             - name: Download Gitleaks Report
               uses: actions/download-artifact@v7
@@ -175,11 +271,20 @@ jobs:
                   name: trivy-report
                   path: reports
 
+            - name: Download Semgrep Report
+              uses: actions/download-artifact@v7
+              continue-on-error: true
+              with:
+                  name: semgrep-report
+                  path: reports
+
             - name: Generate Excel Dashboard
               id: aggregate
               env:
                   GITLEAKS_STATUS: ${{ needs.gitleaks.result }}
                   TRIVY_STATUS: ${{ needs.trivy.result }}
+                  SEMGREP_STATUS: ${{ needs.semgrep.result }}
+                  SONARQUBE_STATUS: ${{ needs.sonarqube.outputs.outcome || needs.sonarqube.result }}
               shell: bash
               run: |
                   set -euo pipefail
@@ -190,15 +295,20 @@ jobs:
                   .venv/bin/python scripts/generate_security_report.py \
                     --gitleaks reports/gitleaks-report.json \
                     --trivy reports/trivy-report.json \
+                    --semgrep reports/semgrep-report.json \
                     --output reports/security-report.xlsx \
                     --repository "$TARGET_REPOSITORY" \
                     --gitleaks-status "$GITLEAKS_STATUS" \
                     --trivy-status "$TRIVY_STATUS" \
+                    --semgrep-status "$SEMGREP_STATUS" \
+                    --sonarqube-status "$SONARQUBE_STATUS" \
                     --workflow-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
                     --github-output "$GITHUB_OUTPUT"
 
                   echo "gitleaks_status=$GITLEAKS_STATUS" >> "$GITHUB_OUTPUT"
                   echo "trivy_status=$TRIVY_STATUS" >> "$GITHUB_OUTPUT"
+                  echo "semgrep_status=$SEMGREP_STATUS" >> "$GITHUB_OUTPUT"
+                  echo "sonarqube_status=$SONARQUBE_STATUS" >> "$GITHUB_OUTPUT"
 
             - name: Upload Security Reports
               if: always()
@@ -213,14 +323,14 @@ jobs:
               if: always()
               shell: bash
               run: |
-                  if [[ "${{ needs.gitleaks.result }}" != "success" || "${{ needs.trivy.result }}" != "success" ]]; then
+                  if [[ "${{ needs.gitleaks.result }}" != "success" || "${{ needs.trivy.result }}" != "success" || "${{ needs.semgrep.result }}" != "success" ]]; then
                     echo "::error::A scanner reported findings or encountered an error. Review reports and logs."
                     exit 1
                   fi
 
     email:
         name: Security Reports
-        needs: [gitleaks, trivy, report]
+        needs: [gitleaks, trivy, semgrep, sonarqube, report]
         if: always()
         uses: ./.github/workflows/send-reports.yml
 
@@ -234,8 +344,11 @@ jobs:
             scan_status: ${{ needs.report.result }}
             gitleaks_status: ${{ needs.report.outputs.gitleaks_status || needs.gitleaks.result }}
             trivy_status: ${{ needs.report.outputs.trivy_status || needs.trivy.result }}
+            semgrep_status: ${{ needs.report.outputs.semgrep_status || needs.semgrep.result }}
+            sonarqube_status: ${{ needs.report.outputs.sonarqube_status || needs.sonarqube.result }}
             gitleaks_count: ${{ needs.report.outputs.gitleaks_count }}
             trivy_count: ${{ needs.report.outputs.trivy_count }}
             trivy_packages_count: ${{ needs.report.outputs.trivy_packages_count }}
+            semgrep_count: ${{ needs.report.outputs.semgrep_count }}
             total_count: ${{ needs.report.outputs.total_count }}
         secrets: inherit

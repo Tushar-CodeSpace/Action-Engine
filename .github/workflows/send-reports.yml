@@ -42,6 +42,18 @@ on:
                 type: string
                 default: "unknown"
 
+            semgrep_status:
+                description: Semgrep step result
+                required: false
+                type: string
+                default: "unknown"
+
+            sonarqube_status:
+                description: SonarQube step result
+                required: false
+                type: string
+                default: "unknown"
+
             gitleaks_count:
                 description: Number of Gitleaks findings
                 required: false
@@ -50,6 +62,12 @@ on:
 
             trivy_count:
                 description: Number of Trivy findings
+                required: false
+                type: string
+                default: "N/A"
+
+            semgrep_count:
+                description: Number of Semgrep SAST findings
                 required: false
                 type: string
                 default: "N/A"
@@ -98,8 +116,11 @@ jobs:
                   SCAN_STATUS: ${{ inputs.scan_status }}
                   GITLEAKS_STATUS: ${{ inputs.gitleaks_status }}
                   TRIVY_STATUS: ${{ inputs.trivy_status }}
+                  SEMGREP_STATUS: ${{ inputs.semgrep_status }}
+                  SONARQUBE_STATUS: ${{ inputs.sonarqube_status }}
                   GITLEAKS_COUNT: ${{ inputs.gitleaks_count }}
                   TRIVY_COUNT: ${{ inputs.trivy_count }}
+                  SEMGREP_COUNT: ${{ inputs.semgrep_count }}
                   TRIVY_PACKAGES_COUNT: ${{ inputs.trivy_packages_count }}
                   TOTAL_COUNT: ${{ inputs.total_count }}
               shell: bash
@@ -124,19 +145,21 @@ jobs:
                           return "#dcfce7", "#166534", "SUCCESS"
                       if value in ("failure", "cancelled", "timed_out"):
                           return "#fee2e2", "#991b1b", "REVIEW REQUIRED"
+                      if value in ("skipped", "disabled"):
+                          return "#f1f5f9", "#475569", "SKIPPED"
                       return "#fef3c7", "#92400e", "UNKNOWN"
 
                   def status_card(label, raw):
                       bg, fg, display = status_style(raw)
                       return f"""
-                        <td style="padding:8px;width:33.33%;vertical-align:top">
+                        <td style="padding:6px;width:33.33%;vertical-align:top">
                           <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
                                  style="border:1px solid #e5e7eb;border-radius:8px">
-                            <tr><td style="padding:14px">
-                              <div style="font-size:12px;color:#6b7280">{esc(label)}</div>
-                              <div style="margin-top:8px">
+                            <tr><td style="padding:12px 10px">
+                              <div style="font-size:11px;color:#6b7280;font-weight:600">{esc(label)}</div>
+                              <div style="margin-top:6px">
                                 <span style="display:inline-block;background:{bg};color:{fg};
-                                  padding:6px 9px;border-radius:5px;font-size:12px;font-weight:bold">
+                                  padding:4px 8px;border-radius:5px;font-size:11px;font-weight:bold">
                                   {esc(display)}
                                 </span>
                               </div>
@@ -161,6 +184,8 @@ jobs:
                   scan = get("SCAN_STATUS", "unknown")
                   gl_status = get("GITLEAKS_STATUS", "unknown")
                   trivy_status = get("TRIVY_STATUS", "unknown")
+                  semgrep_status = get("SEMGREP_STATUS", "unknown")
+                  sonarqube_status = get("SONARQUBE_STATUS", "unknown")
 
                   bg, fg, scan_label = status_style(scan)
 
@@ -204,7 +229,12 @@ jobs:
                               <tr>
                                 {status_card("GITLEAKS", gl_status)}
                                 {status_card("TRIVY", trivy_status)}
+                                {status_card("SEMGREP", semgrep_status)}
+                              </tr>
+                              <tr>
+                                {status_card("SONARQUBE", sonarqube_status)}
                                 {status_card("PIPELINE", scan)}
+                                <td style="padding:6px;width:33.33%"></td>
                               </tr>
                             </table>
                           </td></tr>
@@ -229,6 +259,13 @@ jobs:
                               </tr>
                               <tr style="background:#f9fafb">
                                 <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  Semgrep SAST findings
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("SEMGREP_COUNT"))}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
                                   Trivy packages scanned
                                 </td>
                                 <td align="right" style="padding:11px;border:1px solid #e5e7eb;
@@ -236,7 +273,7 @@ jobs:
                               </tr>
                               <tr style="background:#f9fafb">
                                 <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
-                                  Total findings
+                                  Total security findings
                                 </td>
                                 <td align="right" style="padding:11px;border:1px solid #e5e7eb;
                                     font-size:13px;font-weight:bold">{esc(get("TOTAL_COUNT"))}</td>
@@ -247,9 +284,9 @@ jobs:
                           <tr><td style="padding:18px 22px">
                             <h2 style="font-size:16px;margin:0 0 10px">Reports &amp; Actions</h2>
                             <p style="font-size:13px;line-height:1.7;color:#4b5563;margin:0 0 12px">
-                              The Excel dashboard and available JSON reports are attached to this email.
-                              Review findings, investigate exposed secrets, and remediate vulnerabilities
-                              or misconfigurations before the next release.
+                              The Excel dashboard and available scanner reports are attached to this email.
+                              Review findings, investigate exposed secrets, code quality issues, and remediate
+                              vulnerabilities or misconfigurations before the next release.
                             </p>
                             {workflow_link}
                           </td></tr>
