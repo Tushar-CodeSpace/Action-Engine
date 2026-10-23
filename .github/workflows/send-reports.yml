@@ -365,14 +365,6 @@ jobs:
                               Review findings, investigate exposed secrets, code quality issues, and remediate
                               vulnerabilities or misconfigurations before the next release.
                             </p>
-                            {f'''<div style="margin:14px 0 12px">
-                              <a href="{esc(get("SONARQUBE_DASHBOARD_URL"))}" target="_blank"
-                                 style="display:inline-block;background:#17365D;color:#ffffff;
-                                        padding:9px 16px;border-radius:6px;text-decoration:none;
-                                        font-size:13px;font-weight:bold">
-                                Open SonarQube Dashboard &rarr;
-                              </a>
-                            </div>''' if get("SONARQUBE_DASHBOARD_URL", "") else ''}
                             {workflow_link}
                           </td></tr>
 
