@@ -43,6 +43,7 @@ Action-Engine/
 │   └── workflows/
 │       ├── scan.repo.action-engine.yml        # Self-scanning workflow for Action Engine
 │       ├── scan.repo.nidoworkz-backend.yml     # Remote scanning workflow for NIDOWORKZ Backend
+│       ├── scan.repo.public-custom.yml        # On-demand scanner for custom public open-source repos
 │       └── send-reports.yml                   # Reusable workflow: HTML dashboard & email alerts
 ├── docs/
 │   ├── ARCHITECTURE.md                        # Platform architecture & pipeline flow

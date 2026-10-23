@@ -1,0 +1,451 @@
+name: Scan - Repo - Public Custom
+
+on:
+    workflow_dispatch:
+        inputs:
+            repository:
+                description: 'Target public GitHub repository (e.g. pallets/flask, expressjs/express)'
+                required: true
+                type: string
+            branch:
+                description: 'Branch or tag to clone (leave empty for default branch)'
+                required: false
+                default: ""
+                type: string
+            fail_on_findings:
+                description: 'Fail pipeline on detected issues (set false for audit/contribution)'
+                required: false
+                default: false
+                type: boolean
+
+permissions:
+    contents: read
+
+env:
+    TARGET_REPOSITORY: ${{ inputs.repository }}
+    TARGET_BRANCH: ${{ inputs.branch }}
+    GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1
+    SEMGREP_IMAGE: semgrep/semgrep:latest
+    TRIVY_VERSION: "latest"
+    TRIVY_SEVERITY: HIGH,CRITICAL
+    TRIVY_SCANNERS: vuln,misconfig
+    SONAR_HOST_URL: "http://localhost:9000"
+    REPORT_RETENTION_DAYS: "14"
+
+jobs:
+    gitleaks:
+        name: Gitleaks
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+
+        outputs:
+            outcome: ${{ steps.gitleaks.outcome }}
+
+        steps:
+            - name: Validate Target Repository
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  if [[ ! "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+                    echo "::error::Target repository must be in 'owner/repo' format (e.g. pallets/flask)."
+                    exit 1
+                  fi
+
+            - name: Prepare Report Directory
+              shell: bash
+              run: |
+                  mkdir -p reports
+                  printf '[]\n' > reports/gitleaks-report.json
+
+            - name: Clone Public Target Repository
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  CLONE_URL="https://github.com/${TARGET_REPOSITORY}.git"
+                  echo "Cloning public repository $CLONE_URL..."
+                  if [[ -n "${TARGET_BRANCH}" ]]; then
+                    git clone --depth 50 --branch "${TARGET_BRANCH}" "$CLONE_URL" target-repo
+                  else
+                    git clone --depth 50 "$CLONE_URL" target-repo
+                  fi
+
+            - name: Scan Git History with Gitleaks
+              id: gitleaks
+              continue-on-error: true
+              shell: bash
+              run: |
+                  docker run --rm \
+                    -v "$GITHUB_WORKSPACE:/workspace" \
+                    -w /workspace/target-repo \
+                    "$GITLEAKS_IMAGE" \
+                    git . \
+                    --redact \
+                    --no-banner \
+                    --report-format json \
+                    --report-path /workspace/reports/gitleaks-report.json \
+                    --exit-code 2
+
+            - name: Upload Gitleaks Report
+              if: always()
+              uses: actions/upload-artifact@v6
+              with:
+                  name: gitleaks-report
+                  path: reports/gitleaks-report.json
+                  if-no-files-found: warn
+                  retention-days: 1
+
+            - name: Check Gitleaks Outcome
+              if: always()
+              shell: bash
+              run: |
+                  if [[ "${{ steps.gitleaks.outcome }}" != "success" ]]; then
+                    if [[ "${{ inputs.fail_on_findings }}" == "true" ]]; then
+                      echo "::error::Gitleaks detected secrets or encountered an error."
+                      exit 1
+                    else
+                      echo "::notice::Gitleaks detected secrets or potential credentials."
+                    fi
+                  fi
+
+    trivy:
+        name: Trivy
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+
+        outputs:
+            outcome: ${{ steps.trivy.outcome }}
+
+        steps:
+            - name: Validate Target Repository
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  if [[ ! "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+                    echo "::error::Target repository must be in 'owner/repo' format."
+                    exit 1
+                  fi
+
+            - name: Prepare Report Directory
+              shell: bash
+              run: |
+                  mkdir -p reports
+                  printf '{"Results":[]}\n' > reports/trivy-report.json
+
+            - name: Clone Public Target Repository
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  CLONE_URL="https://github.com/${TARGET_REPOSITORY}.git"
+                  if [[ -n "${TARGET_BRANCH}" ]]; then
+                    git clone --depth 1 --branch "${TARGET_BRANCH}" "$CLONE_URL" target-repo
+                  else
+                    git clone --depth 1 "$CLONE_URL" target-repo
+                  fi
+
+            - name: Install Trivy
+              uses: aquasecurity/setup-trivy@e07451d2e059ed86c2870430ea286b3a9e0bf241
+              with:
+                  version: ${{ env.TRIVY_VERSION }}
+
+            - name: Scan Filesystem with Trivy
+              id: trivy
+              continue-on-error: true
+              shell: bash
+              run: |
+                  trivy fs \
+                    --scanners "$TRIVY_SCANNERS" \
+                    --severity "$TRIVY_SEVERITY" \
+                    --format json \
+                    --output reports/trivy-report.json \
+                    --exit-code 1 \
+                    --no-progress \
+                    target-repo
+
+            - name: Upload Trivy Report
+              if: always()
+              uses: actions/upload-artifact@v6
+              with:
+                  name: trivy-report
+                  path: reports/trivy-report.json
+                  if-no-files-found: warn
+                  retention-days: 1
+
+            - name: Check Trivy Outcome
+              if: always()
+              shell: bash
+              run: |
+                  if [[ "${{ steps.trivy.outcome }}" != "success" ]]; then
+                    if [[ "${{ inputs.fail_on_findings }}" == "true" ]]; then
+                      echo "::error::Trivy detected vulnerabilities/misconfigurations or encountered an error."
+                      exit 1
+                    else
+                      echo "::notice::Trivy detected vulnerabilities or misconfigurations."
+                    fi
+                  fi
+
+    semgrep:
+        name: Semgrep SAST
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+
+        outputs:
+            outcome: ${{ steps.semgrep.outcome }}
+
+        steps:
+            - name: Validate Target Repository
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  if [[ ! "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+                    echo "::error::Target repository must be in 'owner/repo' format."
+                    exit 1
+                  fi
+
+            - name: Prepare Report Directory
+              shell: bash
+              run: |
+                  mkdir -p reports
+                  printf '{"results":[]}\n' > reports/semgrep-report.json
+
+            - name: Clone Public Target Repository
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  CLONE_URL="https://github.com/${TARGET_REPOSITORY}.git"
+                  if [[ -n "${TARGET_BRANCH}" ]]; then
+                    git clone --depth 1 --branch "${TARGET_BRANCH}" "$CLONE_URL" target-repo
+                  else
+                    git clone --depth 1 "$CLONE_URL" target-repo
+                  fi
+
+            - name: Scan Code with Semgrep SAST
+              id: semgrep
+              continue-on-error: true
+              shell: bash
+              run: |
+                  docker run --rm \
+                    -v "$GITHUB_WORKSPACE/target-repo:/src" \
+                    -v "$GITHUB_WORKSPACE/reports:/reports" \
+                    -w /src \
+                    "$SEMGREP_IMAGE" \
+                    semgrep scan --config auto --json --output /reports/semgrep-report.json
+
+            - name: Upload Semgrep Report
+              if: always()
+              uses: actions/upload-artifact@v6
+              with:
+                  name: semgrep-report
+                  path: reports/semgrep-report.json
+                  if-no-files-found: warn
+                  retention-days: 1
+
+            - name: Check Semgrep Outcome
+              if: always()
+              shell: bash
+              run: |
+                  if [[ "${{ steps.semgrep.outcome }}" != "success" ]]; then
+                    echo "::error::Semgrep execution encountered an error."
+                    exit 1
+                  fi
+
+    sonarqube:
+        name: SonarQube
+        runs-on: [self-hosted, ActionEngine]
+        timeout-minutes: 30
+
+        outputs:
+            outcome: ${{ steps.sonar.outcome || steps.check_token.outputs.status }}
+
+        steps:
+            - name: Validate Target Repository
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  if [[ ! "$TARGET_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+                    echo "::error::Target repository must be in 'owner/repo' format."
+                    exit 1
+                  fi
+
+            - name: Determine Project Key
+              id: vars
+              shell: bash
+              run: |
+                  SAFE_KEY="$(echo "${TARGET_REPOSITORY}" | tr '/' '_' | tr -cd 'A-Za-z0-9_.-')"
+                  echo "project_key=${SAFE_KEY}" >> "$GITHUB_OUTPUT"
+
+            - name: Clone Public Target Repository
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  rm -rf target-repo
+                  CLONE_URL="https://github.com/${TARGET_REPOSITORY}.git"
+                  if [[ -n "${TARGET_BRANCH}" ]]; then
+                    git clone --depth 50 --branch "${TARGET_BRANCH}" "$CLONE_URL" target-repo
+                  else
+                    git clone --depth 50 "$CLONE_URL" target-repo
+                  fi
+
+            - name: Verify SonarQube Credentials
+              id: check_token
+              shell: bash
+              run: |
+                  if [[ -z "${{ secrets.SONAR_TOKEN }}" ]]; then
+                    echo "::warning::SONAR_TOKEN is not configured. SonarQube analysis skipped."
+                    echo "status=skipped" >> "$GITHUB_OUTPUT"
+                  else
+                    echo "status=configured" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: SonarQube Scan
+              id: sonar
+              if: steps.check_token.outputs.status == 'configured'
+              continue-on-error: true
+              uses: SonarSource/sonarqube-scan-action@v8
+              env:
+                  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+                  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || env.SONAR_HOST_URL }}
+              with:
+                  projectBaseDir: target-repo
+                  args: >
+                      -Dsonar.projectKey=${{ steps.vars.outputs.project_key }}
+                      -Dsonar.projectName=${{ env.TARGET_REPOSITORY }}
+                      -Dsonar.sources=.
+
+    report:
+        name: Generate Security Reports
+        needs: [gitleaks, trivy, semgrep, sonarqube]
+        if: always()
+        runs-on: ubuntu-24.04
+        timeout-minutes: 15
+
+        outputs:
+            gitleaks_status: ${{ steps.aggregate.outputs.gitleaks_status }}
+            trivy_status: ${{ steps.aggregate.outputs.trivy_status }}
+            semgrep_status: ${{ steps.aggregate.outputs.semgrep_status }}
+            sonarqube_status: ${{ steps.aggregate.outputs.sonarqube_status }}
+            gitleaks_count: ${{ steps.aggregate.outputs.gitleaks_count }}
+            trivy_count: ${{ steps.aggregate.outputs.trivy_count }}
+            trivy_packages_count: ${{ steps.aggregate.outputs.trivy_packages_count }}
+            semgrep_count: ${{ steps.aggregate.outputs.semgrep_count }}
+            total_count: ${{ steps.aggregate.outputs.total_count }}
+
+        steps:
+            - name: Checkout Action-Engine Repository
+              uses: actions/checkout@v5
+              with:
+                  persist-credentials: false
+
+            - name: Prepare Report Directory
+              shell: bash
+              run: |
+                  mkdir -p reports
+                  printf '[]\n' > reports/gitleaks-report.json
+                  printf '{"Results":[]}\n' > reports/trivy-report.json
+                  printf '{"results":[]}\n' > reports/semgrep-report.json
+
+            - name: Download Gitleaks Report
+              uses: actions/download-artifact@v7
+              continue-on-error: true
+              with:
+                  name: gitleaks-report
+                  path: reports
+
+            - name: Download Trivy Report
+              uses: actions/download-artifact@v7
+              continue-on-error: true
+              with:
+                  name: trivy-report
+                  path: reports
+
+            - name: Download Semgrep Report
+              uses: actions/download-artifact@v7
+              continue-on-error: true
+              with:
+                  name: semgrep-report
+                  path: reports
+
+            - name: Generate Excel Dashboard
+              id: aggregate
+              env:
+                  GITLEAKS_STATUS: ${{ needs.gitleaks.outputs.outcome || needs.gitleaks.result }}
+                  TRIVY_STATUS: ${{ needs.trivy.outputs.outcome || needs.trivy.result }}
+                  SEMGREP_STATUS: ${{ needs.semgrep.outputs.outcome || needs.semgrep.result }}
+                  SONARQUBE_STATUS: ${{ needs.sonarqube.outputs.outcome || needs.sonarqube.result }}
+              shell: bash
+              run: |
+                  set -euo pipefail
+
+                  python3 -m venv .venv
+                  .venv/bin/python -m pip install openpyxl
+
+                  .venv/bin/python scripts/generate_security_report.py \
+                    --gitleaks reports/gitleaks-report.json \
+                    --trivy reports/trivy-report.json \
+                    --semgrep reports/semgrep-report.json \
+                    --output reports/security-report.xlsx \
+                    --repository "$TARGET_REPOSITORY" \
+                    --gitleaks-status "$GITLEAKS_STATUS" \
+                    --trivy-status "$TRIVY_STATUS" \
+                    --semgrep-status "$SEMGREP_STATUS" \
+                    --sonarqube-status "$SONARQUBE_STATUS" \
+                    --workflow-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+                    --github-output "$GITHUB_OUTPUT"
+
+                  echo "gitleaks_status=$GITLEAKS_STATUS" >> "$GITHUB_OUTPUT"
+                  echo "trivy_status=$TRIVY_STATUS" >> "$GITHUB_OUTPUT"
+                  echo "semgrep_status=$SEMGREP_STATUS" >> "$GITHUB_OUTPUT"
+                  echo "sonarqube_status=$SONARQUBE_STATUS" >> "$GITHUB_OUTPUT"
+
+            - name: Upload Security Reports
+              if: always()
+              uses: actions/upload-artifact@v6
+              with:
+                  name: security-reports
+                  path: reports/
+                  if-no-files-found: warn
+                  retention-days: ${{ env.REPORT_RETENTION_DAYS }}
+
+            - name: Fail if a scanner failed or found issues
+              if: inputs.fail_on_findings == true
+              env:
+                  GITLEAKS_STATUS: ${{ needs.gitleaks.outputs.outcome || needs.gitleaks.result }}
+                  TRIVY_STATUS: ${{ needs.trivy.outputs.outcome || needs.trivy.result }}
+                  SEMGREP_STATUS: ${{ needs.semgrep.outputs.outcome || needs.semgrep.result }}
+              shell: bash
+              run: |
+                  if [[ "$GITLEAKS_STATUS" != "success" || "$TRIVY_STATUS" != "success" || "$SEMGREP_STATUS" != "success" ]]; then
+                    echo "::error::A scanner reported findings or encountered an error in $TARGET_REPOSITORY."
+                    exit 1
+                  fi
+
+    email:
+        name: Security Reports / Send Email
+        needs: [gitleaks, trivy, semgrep, sonarqube, report]
+        if: always()
+        uses: ./.github/workflows/send-reports.yml
+        with:
+            artifact_name: security-reports
+            email_subject: "[Security Scan] Public Repo: ${{ inputs.repository }} - ${{ needs.report.result }}"
+            email_body: |
+                Target Repository: https://github.com/${{ inputs.repository }}
+                Target Branch / Tag: ${{ inputs.branch || 'default' }}
+                Review the attached security reports and open-source contribution opportunities.
+            workflow_url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            scan_status: ${{ needs.report.result }}
+            gitleaks_status: ${{ needs.report.outputs.gitleaks_status || needs.gitleaks.result }}
+            trivy_status: ${{ needs.report.outputs.trivy_status || needs.trivy.result }}
+            semgrep_status: ${{ needs.report.outputs.semgrep_status || needs.semgrep.result }}
+            sonarqube_status: ${{ needs.report.outputs.sonarqube_status || needs.sonarqube.result }}
+            gitleaks_count: ${{ needs.report.outputs.gitleaks_count }}
+            trivy_count: ${{ needs.report.outputs.trivy_count }}
+            trivy_packages_count: ${{ needs.report.outputs.trivy_packages_count }}
+            semgrep_count: ${{ needs.report.outputs.semgrep_count }}
+            total_count: ${{ needs.report.outputs.total_count }}
+        secrets:
+            MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+            MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+            MAIL_TO: ${{ secrets.MAIL_TO }}

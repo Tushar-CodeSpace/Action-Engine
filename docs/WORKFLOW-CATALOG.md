@@ -39,7 +39,19 @@ This catalog distinguishes the initial implementation from future capabilities.
 - **Authentication:** Authenticates to private target repository using `NIDO_ACCOUNT_USER` and `NIDO_ACCOUNT_PAT` repository secrets.
 - **Architecture:** Mirrors the 4-stage parallel scanning, Excel aggregation, and email alerting pipeline of `scan.repo.action-engine.yml`.
 
-### 3.3 Reusable Email Reporting: Send Pipeline Reports (`send-reports.yml`)
+### 3.3 Public Repository Scan: Custom Open Source (`scan.repo.public-custom.yml`)
+
+- **File:** [`.github/workflows/scan.repo.public-custom.yml`](file:///home/snyder/DevOps/Action-Engine/.github/workflows/scan.repo.public-custom.yml)
+- **Target Repository:** User-defined public GitHub repository (e.g. `pallets/flask`, `expressjs/express`).
+- **Triggers:** Manual `workflow_dispatch` with inputs:
+  - `repository` (required): GitHub repository in `owner/repo` format.
+  - `branch` (optional): Branch or tag name to clone (defaults to default branch).
+  - `fail_on_findings` (optional, default `false`): Whether to fail the pipeline when issues are detected, making it ideal for non-blocking open-source security audits and contribution prep.
+- **Authentication:** None needed (public git clone).
+- **Scanners:** Parallel Gitleaks, Trivy, Semgrep SAST, and SonarQube (on self-hosted runner).
+- **Reporting:** Generates the consolidated Excel report (`security-report.xlsx`) and emails the interactive HTML summary.
+
+### 3.4 Reusable Email Reporting: Send Pipeline Reports (`send-reports.yml`)
 
 - **File:** [`.github/workflows/send-reports.yml`](file:///home/snyder/DevOps/Action-Engine/.github/workflows/send-reports.yml)
 - **Trigger:** `workflow_call` (invoked by scanning workflows).
