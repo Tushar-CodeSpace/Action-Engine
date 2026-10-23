@@ -108,6 +108,44 @@ def parse_semgrep(data):
     return rows
 
 
+def parse_sonarqube(data):
+    if not isinstance(data, dict):
+        return [], {
+            "quality_gate": "N/A",
+            "bugs": "N/A",
+            "vulnerabilities": "N/A",
+            "code_smells": "N/A",
+            "security_hotspots": "N/A",
+            "coverage": "N/A",
+            "dashboard_url": "",
+        }
+    metrics = {
+        "quality_gate": str(data.get("qualityGate", "N/A")),
+        "bugs": str(data.get("bugs", 0)),
+        "vulnerabilities": str(data.get("vulnerabilities", 0)),
+        "code_smells": str(data.get("codeSmells", 0)),
+        "security_hotspots": str(data.get("securityHotspots", 0)),
+        "coverage": str(data.get("coverage", "N/A")),
+        "dashboard_url": str(data.get("dashboardUrl", "")),
+    }
+    rows = []
+    for it in data.get("issues", []) or []:
+        if not isinstance(it, dict):
+            continue
+        rows.append([
+            it.get("key", ""),
+            it.get("type", ""),
+            it.get("severity", ""),
+            it.get("rule", ""),
+            it.get("component", "").split(":")[-1],
+            it.get("line", ""),
+            it.get("effort", ""),
+            it.get("status", ""),
+            it.get("message", ""),
+        ])
+    return rows, metrics
+
+
 def add_sheet(wb, title, headers, rows):
     ws = wb.create_sheet(title)
     ws.append(headers)
@@ -161,6 +199,7 @@ def main():
     parser.add_argument("--gitleaks", default="reports/gitleaks-report.json")
     parser.add_argument("--trivy", default="reports/trivy-report.json")
     parser.add_argument("--semgrep", default="reports/semgrep-report.json")
+    parser.add_argument("--sonarqube-report", default="reports/sonarqube-report.json")
     parser.add_argument("--output", default="reports/security-report.xlsx")
     parser.add_argument("--repository", default="unknown/unknown")
     parser.add_argument("--gitleaks-status", default="unknown")
@@ -174,12 +213,14 @@ def main():
     gitleaks = load_json(args.gitleaks, [])
     trivy = load_json(args.trivy, {})
     semgrep = load_json(args.semgrep, {})
+    sonarqube = load_json(args.sonarqube_report, {})
     if not isinstance(gitleaks, list):
         gitleaks = []
 
     gitleaks_rows = parse_gitleaks(gitleaks)
     trivy_rows, severity_counts, package_rows = parse_trivy(trivy)
     semgrep_rows = parse_semgrep(semgrep)
+    sonarqube_rows, sonarqube_metrics = parse_sonarqube(sonarqube)
     total = len(gitleaks_rows) + len(trivy_rows) + len(semgrep_rows)
 
     wb = Workbook()
@@ -197,6 +238,12 @@ def main():
         ["Semgrep SAST status", args.semgrep_status],
         ["Semgrep SAST findings", len(semgrep_rows)],
         ["SonarQube status", args.sonarqube_status],
+        ["SonarQube quality gate", sonarqube_metrics["quality_gate"]],
+        ["SonarQube bugs", sonarqube_metrics["bugs"]],
+        ["SonarQube vulnerabilities", sonarqube_metrics["vulnerabilities"]],
+        ["SonarQube code smells", sonarqube_metrics["code_smells"]],
+        ["SonarQube security hotspots", sonarqube_metrics["security_hotspots"]],
+        ["SonarQube dashboard", sonarqube_metrics["dashboard_url"]],
         ["Total security findings", total],
         ["", ""],
         ["TRIVY SEVERITY BREAKDOWN", "Count"],
@@ -232,6 +279,12 @@ def main():
         ["Rule ID", "Severity", "File", "Line", "CWE", "OWASP", "Message"],
         semgrep_rows,
     )
+    add_sheet(
+        wb,
+        "SonarQube Issues",
+        ["Issue Key", "Type", "Severity", "Rule", "Component", "Line", "Effort", "Status", "Message"],
+        sonarqube_rows,
+    )
     style_workbook(wb)
 
     output = Path(args.output)
@@ -243,6 +296,10 @@ def main():
     print(f"Trivy findings: {len(trivy_rows)}")
     print(f"Trivy packages analyzed: {len(package_rows)}")
     print(f"Semgrep SAST findings: {len(semgrep_rows)}")
+    print(f"SonarQube quality gate: {sonarqube_metrics['quality_gate']}")
+    print(f"SonarQube bugs: {sonarqube_metrics['bugs']}")
+    print(f"SonarQube vulnerabilities: {sonarqube_metrics['vulnerabilities']}")
+    print(f"SonarQube code smells: {sonarqube_metrics['code_smells']}")
     print(f"Total findings: {total}")
 
     if args.github_output:
@@ -251,6 +308,12 @@ def main():
             f.write(f"trivy_count={len(trivy_rows)}\n")
             f.write(f"trivy_packages_count={len(package_rows)}\n")
             f.write(f"semgrep_count={len(semgrep_rows)}\n")
+            f.write(f"sonarqube_gate={sonarqube_metrics['quality_gate']}\n")
+            f.write(f"sonarqube_bugs={sonarqube_metrics['bugs']}\n")
+            f.write(f"sonarqube_vulnerabilities={sonarqube_metrics['vulnerabilities']}\n")
+            f.write(f"sonarqube_code_smells={sonarqube_metrics['code_smells']}\n")
+            f.write(f"sonarqube_hotspots={sonarqube_metrics['security_hotspots']}\n")
+            f.write(f"sonarqube_dashboard_url={sonarqube_metrics['dashboard_url']}\n")
             f.write(f"total_count={total}\n")
 
 

@@ -225,6 +225,26 @@ jobs:
                       -Dsonar.projectName=Action-Engine
                       -Dsonar.sources=.
 
+            - name: Fetch SonarQube Report
+              if: always() && steps.sonar.outcome == 'success'
+              env:
+                  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+              shell: bash
+              run: |
+                  mkdir -p reports
+                  python3 scripts/fetch_sonarqube_report.py \
+                    --report-task .scannerwork/report-task.txt \
+                    --output reports/sonarqube-report.json
+
+            - name: Upload SonarQube Report
+              if: always()
+              uses: actions/upload-artifact@v6
+              with:
+                  name: sonarqube-report
+                  path: reports/sonarqube-report.json
+                  if-no-files-found: warn
+                  retention-days: 1
+
     report:
         name: Generate Security Reports
         needs: [gitleaks, trivy, semgrep, sonarqube]
@@ -237,6 +257,12 @@ jobs:
             trivy_status: ${{ steps.aggregate.outputs.trivy_status }}
             semgrep_status: ${{ steps.aggregate.outputs.semgrep_status }}
             sonarqube_status: ${{ steps.aggregate.outputs.sonarqube_status }}
+            sonarqube_gate: ${{ steps.aggregate.outputs.sonarqube_gate }}
+            sonarqube_bugs: ${{ steps.aggregate.outputs.sonarqube_bugs }}
+            sonarqube_vulnerabilities: ${{ steps.aggregate.outputs.sonarqube_vulnerabilities }}
+            sonarqube_code_smells: ${{ steps.aggregate.outputs.sonarqube_code_smells }}
+            sonarqube_hotspots: ${{ steps.aggregate.outputs.sonarqube_hotspots }}
+            sonarqube_dashboard_url: ${{ steps.aggregate.outputs.sonarqube_dashboard_url }}
             gitleaks_count: ${{ steps.aggregate.outputs.gitleaks_count }}
             trivy_count: ${{ steps.aggregate.outputs.trivy_count }}
             trivy_packages_count: ${{ steps.aggregate.outputs.trivy_packages_count }}
@@ -256,6 +282,7 @@ jobs:
                   printf '[]\n' > reports/gitleaks-report.json
                   printf '{"Results":[]}\n' > reports/trivy-report.json
                   printf '{"results":[]}\n' > reports/semgrep-report.json
+                  printf '{"qualityGate":"N/A","bugs":0,"vulnerabilities":0,"codeSmells":0,"securityHotspots":0,"issues":[]}\n' > reports/sonarqube-report.json
 
             - name: Download Gitleaks Report
               uses: actions/download-artifact@v7
@@ -278,6 +305,13 @@ jobs:
                   name: semgrep-report
                   path: reports
 
+            - name: Download SonarQube Report
+              uses: actions/download-artifact@v7
+              continue-on-error: true
+              with:
+                  name: sonarqube-report
+                  path: reports
+
             - name: Generate Excel Dashboard
               id: aggregate
               env:
@@ -296,6 +330,7 @@ jobs:
                     --gitleaks reports/gitleaks-report.json \
                     --trivy reports/trivy-report.json \
                     --semgrep reports/semgrep-report.json \
+                    --sonarqube-report reports/sonarqube-report.json \
                     --output reports/security-report.xlsx \
                     --repository "$TARGET_REPOSITORY" \
                     --gitleaks-status "$GITLEAKS_STATUS" \
@@ -346,6 +381,12 @@ jobs:
             trivy_status: ${{ needs.report.outputs.trivy_status || needs.trivy.result }}
             semgrep_status: ${{ needs.report.outputs.semgrep_status || needs.semgrep.result }}
             sonarqube_status: ${{ needs.report.outputs.sonarqube_status || needs.sonarqube.result }}
+            sonarqube_gate: ${{ needs.report.outputs.sonarqube_gate }}
+            sonarqube_bugs: ${{ needs.report.outputs.sonarqube_bugs }}
+            sonarqube_vulnerabilities: ${{ needs.report.outputs.sonarqube_vulnerabilities }}
+            sonarqube_code_smells: ${{ needs.report.outputs.sonarqube_code_smells }}
+            sonarqube_hotspots: ${{ needs.report.outputs.sonarqube_hotspots }}
+            sonarqube_dashboard_url: ${{ needs.report.outputs.sonarqube_dashboard_url }}
             gitleaks_count: ${{ needs.report.outputs.gitleaks_count }}
             trivy_count: ${{ needs.report.outputs.trivy_count }}
             trivy_packages_count: ${{ needs.report.outputs.trivy_packages_count }}

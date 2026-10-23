@@ -54,6 +54,42 @@ on:
                 type: string
                 default: "unknown"
 
+            sonarqube_gate:
+                description: SonarQube quality gate result
+                required: false
+                type: string
+                default: "N/A"
+
+            sonarqube_bugs:
+                description: SonarQube bugs count
+                required: false
+                type: string
+                default: "0"
+
+            sonarqube_vulnerabilities:
+                description: SonarQube vulnerabilities count
+                required: false
+                type: string
+                default: "0"
+
+            sonarqube_code_smells:
+                description: SonarQube code smells count
+                required: false
+                type: string
+                default: "0"
+
+            sonarqube_hotspots:
+                description: SonarQube security hotspots count
+                required: false
+                type: string
+                default: "0"
+
+            sonarqube_dashboard_url:
+                description: SonarQube dashboard URL
+                required: false
+                type: string
+                default: ""
+
             gitleaks_count:
                 description: Number of Gitleaks findings
                 required: false
@@ -121,6 +157,12 @@ jobs:
                   GITLEAKS_COUNT: ${{ inputs.gitleaks_count }}
                   TRIVY_COUNT: ${{ inputs.trivy_count }}
                   SEMGREP_COUNT: ${{ inputs.semgrep_count }}
+                  SONARQUBE_GATE: ${{ inputs.sonarqube_gate }}
+                  SONARQUBE_BUGS: ${{ inputs.sonarqube_bugs }}
+                  SONARQUBE_VULNERABILITIES: ${{ inputs.sonarqube_vulnerabilities }}
+                  SONARQUBE_CODE_SMELLS: ${{ inputs.sonarqube_code_smells }}
+                  SONARQUBE_HOTSPOTS: ${{ inputs.sonarqube_hotspots }}
+                  SONARQUBE_DASHBOARD_URL: ${{ inputs.sonarqube_dashboard_url }}
                   TRIVY_PACKAGES_COUNT: ${{ inputs.trivy_packages_count }}
                   TOTAL_COUNT: ${{ inputs.total_count }}
               shell: bash
@@ -273,6 +315,41 @@ jobs:
                               </tr>
                               <tr style="background:#f9fafb">
                                 <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  SonarQube Quality Gate
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("SONARQUBE_GATE", "N/A"))}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  SonarQube Bugs
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("SONARQUBE_BUGS", "0"))}</td>
+                              </tr>
+                              <tr style="background:#f9fafb">
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  SonarQube Vulnerabilities
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("SONARQUBE_VULNERABILITIES", "0"))}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  SonarQube Code Smells
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("SONARQUBE_CODE_SMELLS", "0"))}</td>
+                              </tr>
+                              <tr style="background:#f9fafb">
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px">
+                                  SonarQube Security Hotspots
+                                </td>
+                                <td align="right" style="padding:11px;border:1px solid #e5e7eb;
+                                    font-size:13px;font-weight:bold">{esc(get("SONARQUBE_HOTSPOTS", "0"))}</td>
+                              </tr>
+                              <tr>
+                                <td style="padding:11px;border:1px solid #e5e7eb;font-size:13px;font-weight:bold">
                                   Total security findings
                                 </td>
                                 <td align="right" style="padding:11px;border:1px solid #e5e7eb;
@@ -288,6 +365,14 @@ jobs:
                               Review findings, investigate exposed secrets, code quality issues, and remediate
                               vulnerabilities or misconfigurations before the next release.
                             </p>
+                            {f'''<div style="margin:14px 0 12px">
+                              <a href="{esc(get("SONARQUBE_DASHBOARD_URL"))}" target="_blank"
+                                 style="display:inline-block;background:#17365D;color:#ffffff;
+                                        padding:9px 16px;border-radius:6px;text-decoration:none;
+                                        font-size:13px;font-weight:bold">
+                                Open SonarQube Dashboard &rarr;
+                              </a>
+                            </div>''' if get("SONARQUBE_DASHBOARD_URL", "") else ''}
                             {workflow_link}
                           </td></tr>
 
