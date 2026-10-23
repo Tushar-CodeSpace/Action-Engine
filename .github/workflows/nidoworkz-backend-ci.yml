@@ -46,7 +46,7 @@ jobs:
             - name: Build ADI Image
               uses: docker/build-push-action@v6
               with:
-                  context: ${{ env.TARGET_DIR }}/app-device-interface
-                  file: ${{ env.TARGET_DIR }}/app-device-interface/Dockerfile
+                  context: ${{ env.TARGET_DIR }}/apps/app-device-interface
+                  file: ${{ env.TARGET_DIR }}/apps/app-device-interface/Dockerfile
                   push: false
                   tags: nidoworkz-adi:v0.1
