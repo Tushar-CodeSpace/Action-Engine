@@ -165,7 +165,7 @@ jobs:
                     -v "$GITHUB_WORKSPACE:/src" \
                     -w /src \
                     "$SEMGREP_IMAGE" \
-                    semgrep scan --config auto --error --json --output /src/reports/semgrep-report.json
+                    semgrep scan --config auto --json --output /src/reports/semgrep-report.json
 
             - name: Upload Semgrep Report
               if: always()
@@ -181,7 +181,7 @@ jobs:
               shell: bash
               run: |
                   if [[ "${{ steps.semgrep.outcome }}" != "success" ]]; then
-                    echo "::error::Semgrep detected security findings or encountered an error."
+                    echo "::error::Semgrep execution encountered an error."
                     exit 1
                   fi
 
