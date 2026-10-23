@@ -11,7 +11,7 @@ permissions:
 
 env:
     TARGET_REPO: NIDO-MACHINERIES/nidoworkz-backend
-    TARGET_BRANCH: feature/NIT-314/document-service-db-configs
+    TARGET_BRANCH: devops/dockerization
     TARGET_REPO_USER: ${{secrets.NIDO_ACCOUNT_USER}}
     TARGET_REPO_PAT: ${{secrets.NIDO_ACCOUNT_PAT}}
     TARGET_DIR: ./nidoworkz-backend
@@ -39,9 +39,10 @@ jobs:
               uses: docker/build-push-action@v6
               with:
                   context: ${{ env.TARGET_DIR }}
-                  file: ${{ env.TARGET_DIR }}/Dockerfile.base
+                  file: ${{ env.TARGET_DIR }}/Dockerfile.Base
                   push: false
-                  tags: nidoworkz-base:v0.1
+                  load: true
+                  tags: nidoworkz-base:latest
 
             - name: Build ADI Image
               uses: docker/build-push-action@v6
@@ -49,4 +50,7 @@ jobs:
                   context: ${{ env.TARGET_DIR }}/apps/app-device-interface
                   file: ${{ env.TARGET_DIR }}/apps/app-device-interface/Dockerfile
                   push: false
-                  tags: nidoworkz-adi:v0.1
+                  load: true
+                  build-args: |
+                      BASE_IMAGE=nidoworkz-base:latest
+                  tags: nidoworkz-adi:latest
